@@ -8,30 +8,59 @@ class ReaderScripts {
   if (window.__pbAdBlockV3) return;
   window.__pbAdBlockV3 = true;
 
-  try { window.open = function(){ return null; }; } catch(e){}
+  // Kill popup APIs hard
+  try {
+    window.open = function(){ return null; };
+    window.showModalDialog = function(){ return null; };
+  } catch(e){}
   try {
     window.alert = function(){};
     window.confirm = function(){ return false; };
     window.prompt = function(){ return null; };
   } catch(e){}
+  try {
+    // stop location hijack loops to ad hosts slightly
+    var _ps = history.pushState.bind(history);
+    var _rs = history.replaceState.bind(history);
+    history.pushState = function(){ try { return _ps.apply(history, arguments); } catch(e){} };
+    history.replaceState = function(){ try { return _rs.apply(history, arguments); } catch(e){} };
+  } catch(e){}
 
-  // Cosmetic CSS early
+  // Cosmetic CSS early — popups + common ad shells
   try {
     var st = document.createElement('style');
     st.id = 'pb-ad-css';
     st.textContent = [
       'iframe[src*="google"],iframe[src*="doubleclick"],iframe[src*="ads"],iframe[src*="adservice"],',
-      'iframe[src*="ad."],iframe[id*="ad"],iframe[class*="ad"],',
+      'iframe[src*="ad."],iframe[id*="ad"],iframe[class*="ad"],iframe[src*="gdt."],iframe[src*="lianmeng"],',
       'ins.adsbygoogle,[id*="google_ads"],[class*="google-ad"],',
       '[class*="adsbox"],[id*="adsbox"],[class*="ad-box"],[class*="ad_box"],',
       '[class*="advert"],[id*="advert"],[class*="adbanner"],[id*="banner_ad"],',
-      '[class*="popup"],[id*="popup"],[class*="pop-up"],[class*="float-ad"],',
+      '[class*="popup"],[id*="popup"],[class*="pop-up"],[class*="popunder"],[class*="float-ad"],',
       '[id*="float"],[class*="floatads"],[class*="gg_"],[id*="gg_"],',
       '[class*="guanggao"],[id*="guanggao"],.ads,.ad,.AD,',
-      '#ads,#ad,#AD,#googlead,#div_ad,[onclick*="open("]'
-    ].join('') + '{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;pointer-events:none!important;}';
+      '#ads,#ad,#AD,#googlead,#div_ad,',
+      '[class*="mask"],[class*="overlay"][style*="z-index"],',
+      '[class*="layui-layer"],[class*="layui-m"],.van-overlay,.mui-popup,',
+      'a[target="_blank"][href*="http"]:not([href*="'+location.hostname+'"])'
+    ].join('') + '{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;pointer-events:none!important;opacity:0!important;}';
     (document.documentElement||document.head||document.body).appendChild(st);
   } catch(e){}
+
+  // Neutralize target=_blank and obvious ad clicks
+  document.addEventListener('click', function(ev){
+    try {
+      var a = ev.target && ev.target.closest && ev.target.closest('a,area');
+      if (!a) return;
+      if (a.target === '_blank') a.target = '_self';
+      var href = a.href || '';
+      if (href && /doubleclick|googlesyndication|pagead|adservice|exoclick|popads|juicyads|gdt\.qq|lianmeng|pos\.baidu/i.test(href)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        return false;
+      }
+    } catch(e){}
+  }, true);
 
   var AD_RE = /doubleclick|googlesyndication|googleadservices|googletagmanager|pagead|adservice|adnxs|adsrvr|taboola|outbrain|criteo|scorecardresearch|cnzz|umeng|baidu\.com\/cpro|pos\.baidu|hm\.baidu|tanx\.com|popads|popcash|propeller|exoclick|juicyads|trafficjunky|adsterra|hilltopads|media\.net|moatads|hotjar|clarity\.ms|facebook\.net|analytics|prebid|adsbygoogle|adframe|adserver|partner\.googleadservices|gdt\.qq|lianmeng|mediav|union\.uc|pangolin|pglstatp|bytead|toutiao|snssdk|adkwai|adsystem|securepubads|googletagservices|fundingchoices|cookiebot|onesignal/i;
 

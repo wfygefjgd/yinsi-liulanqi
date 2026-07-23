@@ -73,7 +73,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   bool _stitchEnabled = true;
   bool _popupBlock = true;
   bool _adBlock = true;
-  bool _crossSiteBlock = false;
+  bool _crossSiteBlock = true;
   bool _desktopMode = false;
   late final AnimationController _exitFade;
   late final Animation<double> _exitOpacity;
@@ -720,7 +720,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                   SwitchListTile.adaptive(
                     title: const Text('跨站拦截', style: TextStyle(color: _C.text)),
                     subtitle: const Text(
-                      '默认关。开启后仅拦「无手势」的跨站自动跳转',
+                      '默认开：本站内可跳；禁止跳到其它网站（地址栏/书签仍可）',
                       style: TextStyle(color: _C.secondary, fontSize: 12),
                     ),
                     value: _crossSiteBlock,
