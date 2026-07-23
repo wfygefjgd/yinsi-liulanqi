@@ -5,10 +5,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'durable_store.dart';
-import 'session_identity.dart';
-
-/// Extreme privacy wipe: web data + sandbox, **keeps durable bookmarks/settings**.
+/// Extreme privacy wipe: WebView data + sandbox + prefs + optional cold exit.
 class PrivacyEngine {
   PrivacyEngine._();
 
@@ -21,13 +18,12 @@ class PrivacyEngine {
     try {
       await _wipeWebLayer();
       await _wipeFlutterPrefs();
-      await _wipeAppDirsPreserveDurable();
+      await _wipeAppDirs();
       try {
         await _channel.invokeMethod<void>('nuclearWipe');
       } on PlatformException {
       } on MissingPluginException {
       }
-      SessionIdentity.mint();
       if (exitAfter) {
         await _exitApp();
       }
@@ -37,9 +33,7 @@ class PrivacyEngine {
   }
 
   static Future<void> wipeOnLaunch() async {
-    SessionIdentity.mint();
     await nuclearWipe(exitAfter: false);
-    SessionIdentity.mint();
   }
 
   static Future<void> resetAndRelaunch() async {
@@ -53,10 +47,6 @@ class PrivacyEngine {
     try {
       await InAppWebViewController.clearAllCache();
     } catch (_) {}
-    try {
-      final store = WebStorageManager.instance();
-      await store.deleteAllData();
-    } catch (_) {}
   }
 
   static Future<void> _wipeFlutterPrefs() async {
@@ -66,7 +56,7 @@ class PrivacyEngine {
     } catch (_) {}
   }
 
-  static Future<void> _wipeAppDirsPreserveDurable() async {
+  static Future<void> _wipeAppDirs() async {
     final dirs = <Directory?>[];
     try {
       dirs.add(await getTemporaryDirectory());
@@ -85,10 +75,6 @@ class PrivacyEngine {
       if (dir == null || !await dir.exists()) continue;
       try {
         await for (final entity in dir.list(followLinks: false)) {
-          final name = entity.uri.pathSegments.isNotEmpty
-              ? entity.uri.pathSegments.last
-              : entity.path.split(Platform.pathSeparator).last;
-          if (name == DurableStore.durableDirName) continue;
           try {
             await entity.delete(recursive: true);
           } catch (_) {}

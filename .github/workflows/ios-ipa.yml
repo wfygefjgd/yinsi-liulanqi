@@ -26,11 +26,9 @@ jobs:
       - name: Build iOS release (device, no codesign)
         run: |
           set -euo pipefail
-          # Sideload unsigned build: bypass Flutter "Development Team" gate via xcodebuild.
           flutter precache --ios
           flutter build ios --release --no-codesign --config-only
           cd ios
-          # Ensure pods ready
           pod install --repo-update || pod install
           xcodebuild \
             -workspace Runner.xcworkspace \
@@ -48,20 +46,15 @@ jobs:
             build \
             CONFIGURATION_BUILD_DIR="$PWD/../build/ios/iphoneos"
           test -d ../build/ios/iphoneos/Runner.app
-          ls -la ../build/ios/iphoneos/
 
       - name: Package sideload IPA (unsigned)
         run: |
           set -euo pipefail
           SRC="build/ios/iphoneos/Runner.app"
           test -d "$SRC"
-          test -f "$SRC/Runner"
-          test -f "$SRC/Info.plist"
-
           STAGE="/tmp/privacy_ipa_stage_$$"
           rm -rf "$STAGE"
           mkdir -p "$STAGE/Payload"
-
           /usr/bin/ditto -V --norsrc --noextattr --noqtn "$SRC" "$STAGE/Payload/Runner.app"
           find "$STAGE/Payload/Runner.app" -type l -print0 | while IFS= read -r -d '' link; do
             target=$(readlink "$link" || true)
@@ -74,24 +67,20 @@ jobs:
                 rm -f "$link"
                 /usr/bin/ditto "$target" "$link"
               else
-                echo "WARN dangling symlink: $link -> $target"
                 rm -f "$link"
               fi
             fi
           done
-
           APP="$STAGE/Payload/Runner.app"
           xattr -cr "$APP" || true
           chmod +x "$APP/Runner" || true
           [ -f "$APP/Frameworks/Flutter.framework/Flutter" ] && chmod +x "$APP/Frameworks/Flutter.framework/Flutter"
           [ -f "$APP/Frameworks/App.framework/App" ] && chmod +x "$APP/Frameworks/App.framework/App"
-
           thin_arm64() {
             local bin="$1"
             [ -f "$bin" ] || return 0
             local info
             info=$(lipo -info "$bin" 2>/dev/null || true)
-            echo "lipo $bin : $info"
             if echo "$info" | grep -q "Architectures in the fat file" && echo "$info" | grep -q arm64; then
               lipo -thin arm64 "$bin" -output "${bin}.thin"
               mv "${bin}.thin" "$bin"
@@ -101,22 +90,11 @@ jobs:
           thin_arm64 "$APP/Runner"
           thin_arm64 "$APP/Frameworks/Flutter.framework/Flutter"
           thin_arm64 "$APP/Frameworks/App.framework/App"
-          find "$APP/Frameworks" -type f \( -name "*.dylib" -o -perm -111 \) 2>/dev/null | while read -r f; do
-            thin_arm64 "$f" || true
-          done
-
-          if find "$APP" -type l | grep -q .; then
-            echo "ERROR: symlinks still present:"
-            find "$APP" -type l
-            exit 1
-          fi
-
           python3 <<PY
           import os, zipfile
           stage = "$STAGE"
           ipa = "/tmp/Tongyong-Browser-iOS.ipa"
           root = os.path.join(stage, "Payload")
-          assert os.path.isdir(root)
           with zipfile.ZipFile(ipa, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
               for dirpath, dirnames, filenames in os.walk(root):
                   dirnames.sort()
@@ -125,7 +103,7 @@ jobs:
                   if rel_dir == ".":
                       rel_dir = ""
                   if rel_dir:
-                      entry = rel_dir.replace("\\\\", "/").rstrip("/") + "/"
+                      entry = rel_dir.rstrip("/") + "/"
                       zinfo = zipfile.ZipInfo(entry)
                       zinfo.external_attr = (0o755 << 16) | 0x10
                       zf.writestr(zinfo, b"")
@@ -144,7 +122,6 @@ jobs:
                           zf.writestr(zinfo, f.read())
           print("wrote", ipa, os.path.getsize(ipa))
           PY
-
           mkdir -p build/ipa_dist
           cp -f /tmp/Tongyong-Browser-iOS.ipa build/ipa_dist/Tongyong-Browser-iOS.ipa
           python3 - <<'PY'
@@ -154,7 +131,6 @@ jobs:
           open("build/ipa_dist/SHA256.txt","w").write(h + "  Tongyong-Browser-iOS.ipa\n")
           print(h, os.path.getsize(p))
           PY
-          ls -la build/ipa_dist/
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -169,25 +145,25 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.7.2
-          name: 隐私浏览器 iOS v1.7.2
+          tag_name: v1.0.0-classic
+          name: 隐私浏览器 iOS v1.0.0 简洁版
           body: |
-            ## 隐私浏览器 iOS v1.7.2
+            ## 隐私浏览器 · 回到简洁 1.0
 
-            ### 版本 · **1.7.2** (24) · `com.tongyong.browser`
+            ### 标识（不会覆盖旧复杂版测试包）
+            - **显示名**: 隐私浏览器
+            - **Bundle ID**: `com.tongyong.browser`
+            - **Version**: 1.0.0 · **Build**: 25
 
-            ### 拼接（mumu 类）
-            - `12062.html` → `12062_2.html` → `12062_3.html` → … → `12063.html`
-            - 全局拼接 + 阅读器同一套 URL 算术
-
-            ### 长按
-            - 原生 hit-test + JS 长按双通道打开弹窗
-
-            ### 广告
-            - EasyList 更新；点选保存；赌博关键词
+            ### 功能
+            - 简洁无痕浏览器（地址栏 + 多标签 + 重置核清）
+            - **点击链接 → 在后台新标签打开**（当前页不跳走）
+            - 进后台自动核清网站数据
+            - 已去掉阅读器 / EasyList / 全局拼接等复杂功能
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`
+            - `SHA256.txt`
           files: |
             build/ipa_dist/Tongyong-Browser-iOS.ipa
             build/ipa_dist/SHA256.txt

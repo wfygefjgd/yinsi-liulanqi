@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'browser_tab_model.dart';
 
 class TabManager extends ChangeNotifier {
-  TabManager({this.maxTabs = 15}) {
+  TabManager({this.maxTabs = 8}) {
     _tabs.add(BrowserTabModel(id: _nextId()));
   }
 
@@ -28,12 +28,44 @@ class TabManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool addTab() {
+  bool addTab({String? url}) {
     if (!canAdd) return false;
-    _tabs.add(BrowserTabModel(id: _nextId()));
-    _activeIndex = _tabs.length - 1;
+    final t = BrowserTabModel(id: _nextId());
+    if (url != null && url.isNotEmpty) {
+      t.pendingUrl = url;
+      t.addressText = url;
+      t.url = url;
+      t.title = '加载中…';
+    }
+    _tabs.add(t);
+    // Stay on current tab for background open; only switch if blank new tab from UI
+    if (url == null) {
+      _activeIndex = _tabs.length - 1;
+    }
     notifyListeners();
     return true;
+  }
+
+  /// Open URL in a new background tab; keep current tab focused.
+  bool openInBackground(String url) {
+    if (url.isEmpty) return false;
+    if (!canAdd) {
+      // Replace last non-active tab if full
+      for (var i = _tabs.length - 1; i >= 0; i--) {
+        if (i != _activeIndex) {
+          final t = _tabs[i];
+          t.pendingUrl = url;
+          t.url = url;
+          t.addressText = url;
+          t.title = '后台加载…';
+          t.viewKey; // keep
+          notifyListeners();
+          return true;
+        }
+      }
+      return false;
+    }
+    return addTab(url: url);
   }
 
   void closeTab(int index) {
@@ -50,19 +82,11 @@ class TabManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  void closeActive() => closeTab(_activeIndex);
-
-  /// Destroy every tab session and open one blank tab (fresh process pools).
   void hardResetTabs() {
     _tabs
       ..clear()
       ..add(BrowserTabModel(id: _nextId()));
     _activeIndex = 0;
-    notifyListeners();
-  }
-
-  void updateActive(void Function(BrowserTabModel tab) fn) {
-    fn(active);
     notifyListeners();
   }
 

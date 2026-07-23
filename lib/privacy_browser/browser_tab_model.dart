@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 class BrowserTabModel {
-  BrowserTabModel({required this.id});
+  BrowserTabModel({required this.id, this.initialUrl = ''});
 
   final String id;
   final UniqueKey viewKey = UniqueKey();
@@ -14,8 +14,10 @@ class BrowserTabModel {
   bool canGoForward = false;
   int progress = 0;
 
-  /// Set true before address-bar / bookmark loadUrl so cross-site lock allows once.
-  bool allowCrossSiteOnce = false;
+  /// Pending URL to load once WebView is ready (background open).
+  String? pendingUrl;
 
-  bool get isBlank => url.isEmpty || url == 'about:blank';
+  bool get isBlank =>
+      (url.isEmpty || url == 'about:blank') &&
+      (pendingUrl == null || pendingUrl!.isEmpty);
 }
