@@ -1,4 +1,4 @@
-package com.phub.player.phub_player
+package com.yinsi.liulanqi
 
 import android.os.Process
 import android.webkit.CookieManager

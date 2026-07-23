@@ -8,10 +8,11 @@
 
 https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
-下载 `Privacy-Browser-iOS.ipa`，用全能签 / Sideloadly / AltStore 等自签名安装。
+下载 `Yinsi-Liulanqi-iOS.ipa`，用全能签 / Sideloadly / AltStore 等自签名安装。
 
-- Bundle ID: `com.phub.player.phubPlayer`
+- Bundle ID: `com.yinsi.liulanqi`（与 PHUB Player 不同，可共存）
 - 显示名: 隐私浏览器
+- 版本: 1.0.1 (2)
 - 包体: 未签名（适合侧载）
 
 ## 功能
@@ -27,3 +28,8 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 flutter pub get
 flutter build ios --release --no-codesign
 ```
+
+## 包体说明
+
+iOS IPA 体积主要来自 **Flutter 引擎 + WebView 插件**，不是业务代码。
+已去掉未使用的播放器依赖（`video_player` 等）和遗留 Dart 源码，以减小体积。

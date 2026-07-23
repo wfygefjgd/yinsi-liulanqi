@@ -90,7 +90,7 @@ jobs:
           python3 <<PY
           import os, zipfile
           stage = "$STAGE"
-          ipa = "/tmp/Privacy-Browser-iOS.ipa"
+          ipa = "/tmp/Yinsi-Liulanqi-iOS.ipa"
           root = os.path.join(stage, "Payload")
           assert os.path.isdir(root)
           with zipfile.ZipFile(ipa, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
@@ -122,12 +122,12 @@ jobs:
           PY
 
           mkdir -p build/ipa_dist
-          cp -f /tmp/Privacy-Browser-iOS.ipa build/ipa_dist/Privacy-Browser-iOS.ipa
+          cp -f /tmp/Yinsi-Liulanqi-iOS.ipa build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
           python3 - <<'PY'
           import os, hashlib
-          p = "build/ipa_dist/Privacy-Browser-iOS.ipa"
+          p = "build/ipa_dist/Yinsi-Liulanqi-iOS.ipa"
           h = hashlib.sha256(open(p,"rb").read()).hexdigest()
-          open("build/ipa_dist/SHA256.txt","w").write(h + "  Privacy-Browser-iOS.ipa\n")
+          open("build/ipa_dist/SHA256.txt","w").write(h + "  Yinsi-Liulanqi-iOS.ipa\n")
           print(h, os.path.getsize(p))
           PY
           ls -la build/ipa_dist/
@@ -135,9 +135,9 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Privacy-Browser-iOS
+          name: Yinsi-Liulanqi-iOS
           path: |
-            build/ipa_dist/Privacy-Browser-iOS.ipa
+            build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
             build/ipa_dist/SHA256.txt
           if-no-files-found: error
           retention-days: 30
@@ -153,13 +153,13 @@ jobs:
             自签名安装：全能签 / Sideloadly / AltStore / TrollStore
 
             ### 下载
-            - `Privacy-Browser-iOS.ipa`
+            - `Yinsi-Liulanqi-iOS.ipa`
             - `SHA256.txt`
 
-            Bundle ID: `com.phub.player.phubPlayer`  
+            Bundle ID: `com.yinsi.liulanqi`（独立应用，不会覆盖 PHUB Player）  
             显示名: 隐私浏览器
           files: |
-            build/ipa_dist/Privacy-Browser-iOS.ipa
+            build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
             build/ipa_dist/SHA256.txt
           draft: false
           prerelease: false
