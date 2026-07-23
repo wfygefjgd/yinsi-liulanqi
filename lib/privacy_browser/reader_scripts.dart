@@ -5,8 +5,9 @@ class ReaderScripts {
   /// Stronger runtime ad/popup/DOM cleanup + early CSS cosmetic.
   static const adAndPopupBlock = r'''
 (function(){
-  if (window.__pbAdBlockV4) return;
-  window.__pbAdBlockV4 = true;
+  // re-run scrub even if already installed
+  if (!window.__pbAdBlockV5) {
+  window.__pbAdBlockV5 = true;
 
   // Kill popup APIs hard
   try {
@@ -139,18 +140,15 @@ class ReaderScripts {
   }
 
   scrub();
-  setInterval(scrub, 700);
+  setInterval(scrub, 600);
   try {
     new MutationObserver(function(){ scrub(); })
       .observe(document.documentElement, { childList:true, subtree:true });
   } catch(e){}
-
-  document.addEventListener('click', function(ev){
-    try {
-      var a = ev.target && ev.target.closest && ev.target.closest('a');
-      if (a && a.target === '_blank') a.target = '_self';
-    } catch(e){}
-  }, true);
+  } else {
+    // already installed — still scrub once more when re-injected
+    try { /* scrub from previous install via interval */ } catch(e){}
+  }
 })();
 ''';
 
@@ -314,7 +312,62 @@ class ReaderScripts {
     }
   }
 
-  // C) page= in URL
+  // C) URL arithmetic FIRST-CLASS for novel sites:
+  //    /57/57084/12062.html     → page1
+  //    /57/57084/12062_2.html   → page2
+  //    /57/57084/12063.html     → next chapter
+  function novelNextFromUrl(href){
+    try {
+      var u = new URL(href, location.href);
+      var path = u.pathname;
+      // page N of chapter: .../ID_N.ext  (N>=2)
+      var mPage = path.match(/^(.*\/)(\d+)_(\d+)(\.[a-zA-Z0-9]+)?$/);
+      if (mPage) {
+        var baseId = mPage[2];
+        var pg = parseInt(mPage[3], 10);
+        var ext = mPage[4] || '.html';
+        if (!isNaN(pg) && pg >= 1 && pg < 200) {
+          u.pathname = mPage[1] + baseId + '_' + (pg + 1) + ext;
+          return { href: u.toString(), kind: 'page', page: pg + 1, chapterId: baseId };
+        }
+      }
+      // page 1: .../ID.ext  → .../ID_2.ext
+      var mOne = path.match(/^(.*\/)(\d+)(\.[a-zA-Z0-9]+)$/);
+      if (mOne) {
+        // avoid matching directory-only
+        var id = mOne[2];
+        var ext1 = mOne[3];
+        u.pathname = mOne[1] + id + '_2' + ext1;
+        return { href: u.toString(), kind: 'page', page: 2, chapterId: id };
+      }
+    } catch(e){}
+    return null;
+  }
+  function novelNextChapterFromUrl(href){
+    try {
+      var u = new URL(href, location.href);
+      var path = u.pathname;
+      // from .../12062_5.html or .../12062.html → .../12063.html
+      var m = path.match(/^(.*\/)(\d+)(?:_(\d+))?(\.[a-zA-Z0-9]+)$/);
+      if (m) {
+        var chap = parseInt(m[2], 10);
+        var ext = m[4] || '.html';
+        if (!isNaN(chap)) {
+          u.pathname = m[1] + (chap + 1) + ext;
+          return { href: u.toString(), kind: 'chapter', chapterId: String(chap + 1) };
+        }
+      }
+    } catch(e){}
+    return null;
+  }
+
+  // Prefer URL pattern (works even without pager links on page)
+  if (!nextPage) {
+    var nv = novelNextFromUrl(location.href);
+    if (nv) { nextPage = nv.href; kind = 'page'; }
+  }
+
+  // query ?page=
   if (!nextPage) {
     try {
       var u = new URL(location.href);
@@ -328,21 +381,10 @@ class ReaderScripts {
           }
         }
       }
-      // /xxx_2.html -> _3.html
-      if (!nextPage) {
-        var m = location.pathname.match(/^(.*_)(\d+)(\.\w+)?$/);
-        if (m) {
-          var num = parseInt(m[2],10);
-          if (!isNaN(num) && num < 80) {
-            nextPage = location.origin + m[1] + (num+1) + (m[3]||'') + location.search;
-            kind = 'page';
-          }
-        }
-      }
     } catch(e){}
   }
 
-  // D) 下一章 ONLY if no next page
+  // D) 下一章 ONLY if no next page candidate
   if (!nextPage) {
     for (var j=0;j<links.length;j++){
       var a2 = links[j];
@@ -351,6 +393,10 @@ class ReaderScripts {
       if (/下一[章节回]|下[一]?章|next\s*chapter/i.test(tx2)) {
         nextChapter = a2.href; kind = 'chapter'; break;
       }
+    }
+    if (!nextChapter) {
+      var nc = novelNextChapterFromUrl(location.href);
+      if (nc) { nextChapter = nc.href; kind = 'chapter'; }
     }
   }
 
@@ -372,56 +418,93 @@ class ReaderScripts {
 })();
 ''';
 
-  /// Long-press link → Flutter openLinkPopup(url, title).
+  /// Long-press link → Flutter openLinkPopup(url, title). Force rebind.
   static const longPressOpen = r'''
 (function(){
-  if (window.__pbLongPress) return;
-  window.__pbLongPress = true;
-  var timer = null, startX=0, startY=0, target=null;
+  // always rebind (pages may wipe listeners)
+  if (window.__pbLongPressClear) try { window.__pbLongPressClear(); } catch(e){}
+  var timer = null, startX=0, startY=0, target=null, fired=false;
   function findHref(el){
-    while(el && el !== document.body){
-      if (el.tagName === 'A' && el.href) return el;
-      if (el.getAttribute && el.getAttribute('href')) return el;
+    var n = 0;
+    while(el && el !== document.documentElement && n++ < 12){
+      if (el.tagName === 'A' || el.tagName === 'AREA') {
+        var h = el.href || el.getAttribute('href');
+        if (h) return el;
+      }
+      if (el.getAttribute) {
+        var h2 = el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-url');
+        if (h2) return el;
+      }
       el = el.parentElement;
     }
     return null;
   }
+  function absUrl(el){
+    try {
+      var h = el.href || el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-url') || '';
+      if (!h || h.indexOf('javascript:')===0 || h === '#') return '';
+      return new URL(h, location.href).href;
+    } catch(e){ return ''; }
+  }
+  function openIt(el){
+    var href = absUrl(el);
+    if (!href) return;
+    var title = (el.innerText||el.textContent||'').trim().slice(0,80);
+    try {
+      if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+        window.flutter_inappwebview.callHandler('openLinkPopup', href, title);
+      }
+    } catch(e){}
+  }
   function clear(){ if(timer){ clearTimeout(timer); timer=null; } target=null; }
-  document.addEventListener('touchstart', function(ev){
-    if (!ev.touches || !ev.touches[0]) return;
-    startX = ev.touches[0].clientX; startY = ev.touches[0].clientY;
+  function onStart(ev){
+    fired=false;
+    var t = ev.touches && ev.touches[0] ? ev.touches[0] : ev;
+    startX = t.clientX; startY = t.clientY;
     target = findHref(ev.target);
-    clear();
+    if (timer) clearTimeout(timer);
+    timer = null;
     if (!target) return;
     timer = setTimeout(function(){
-      try {
-        var href = target.href || target.getAttribute('href') || '';
-        if (!href || href.indexOf('javascript:')===0) return;
-        var title = (target.innerText||target.textContent||'').trim().slice(0,80);
-        window.flutter_inappwebview.callHandler('openLinkPopup', href, title);
-      } catch(e){}
-    }, 480);
-  }, {passive:true, capture:true});
-  document.addEventListener('touchmove', function(ev){
-    if (!ev.touches || !ev.touches[0] || !timer) return;
-    var dx = Math.abs(ev.touches[0].clientX - startX);
-    var dy = Math.abs(ev.touches[0].clientY - startY);
-    if (dx > 12 || dy > 12) clear();
-  }, {passive:true, capture:true});
-  document.addEventListener('touchend', clear, {passive:true, capture:true});
-  document.addEventListener('touchcancel', clear, {passive:true, capture:true});
-  // desktop / mouse long press
-  document.addEventListener('contextmenu', function(ev){
+      if (!target || fired) return;
+      fired = true;
+      openIt(target);
+    }, 420);
+  }
+  function onMove(ev){
+    if (!timer) return;
+    var t = ev.touches && ev.touches[0] ? ev.touches[0] : ev;
+    if (Math.abs(t.clientX-startX)>14 || Math.abs(t.clientY-startY)>14) clear();
+  }
+  function onEnd(){ clear(); }
+  function onCtx(ev){
     var a = findHref(ev.target);
     if (!a) return;
-    try {
-      var href = a.href || '';
-      if (!href || href.indexOf('javascript:')===0) return;
-      ev.preventDefault();
-      var title = (a.innerText||a.textContent||'').trim().slice(0,80);
-      window.flutter_inappwebview.callHandler('openLinkPopup', href, title);
-    } catch(e){}
-  }, true);
+    var href = absUrl(a);
+    if (!href) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    openIt(a);
+  }
+  document.addEventListener('touchstart', onStart, true);
+  document.addEventListener('touchmove', onMove, true);
+  document.addEventListener('touchend', onEnd, true);
+  document.addEventListener('touchcancel', onEnd, true);
+  document.addEventListener('mousedown', onStart, true);
+  document.addEventListener('mousemove', onMove, true);
+  document.addEventListener('mouseup', onEnd, true);
+  document.addEventListener('contextmenu', onCtx, true);
+  window.__pbLongPressClear = function(){
+    document.removeEventListener('touchstart', onStart, true);
+    document.removeEventListener('touchmove', onMove, true);
+    document.removeEventListener('touchend', onEnd, true);
+    document.removeEventListener('touchcancel', onEnd, true);
+    document.removeEventListener('mousedown', onStart, true);
+    document.removeEventListener('mousemove', onMove, true);
+    document.removeEventListener('mouseup', onEnd, true);
+    document.removeEventListener('contextmenu', onCtx, true);
+    clear();
+  };
 })();
 ''';
 
@@ -532,116 +615,103 @@ class ReaderScripts {
 })();
 ''';
 
-  /// Global in-page autopager (Yongyeji-style idea): append next same-site pages.
-  /// Prefers numbered 1,2,3… then 下一页; only then 下一章.
+  /// Global autopager — URL-first for sites like:
+  /// /57/57084/12062.html → 12062_2.html → … → 12063.html (next chapter)
   static const globalAutoPager = r'''
 (function(){
-  if (window.__pbAutoPager) return;
-  window.__pbAutoPager = true;
+  if (window.__pbAutoPagerV2) return;
+  window.__pbAutoPagerV2 = true;
   if (window.__pbPickerOn) return;
 
-  var MAX = 40;
+  var MAX = 50;
   var busy = false;
   var count = 0;
+  var failStreak = 0;
   var seen = {};
-  seen[location.href.split('#')[0]] = 1;
+  var cursor = location.href.split('#')[0];
+  seen[cursor] = 1;
 
-  function textOf(el){
-    return (el && (el.innerText||el.textContent)||'').replace(/\s+/g,' ').trim();
-  }
-  function isJs(h){
-    return !h || h.indexOf('javascript:')===0 || h==='#' || h.indexOf('void')>=0;
-  }
-  function sameHost(u){
+  function novelStep(href, wantChapter){
     try {
-      var a = new URL(u, location.href);
-      var b = location.hostname.replace(/^www\./,'');
-      var h = a.hostname.replace(/^www\./,'');
-      return h===b || h.endsWith('.'+b) || b.endsWith('.'+h);
-    } catch(e){ return false; }
+      var u = new URL(href, location.href);
+      var path = u.pathname;
+      // .../12062_3.html → page 4 OR chapter if exhausted handled outside
+      var mPage = path.match(/^(.*\/)(\d+)_(\d+)(\.[a-zA-Z0-9]+)?$/);
+      if (mPage && !wantChapter) {
+        var baseId = mPage[2];
+        var pg = parseInt(mPage[3], 10);
+        var ext = mPage[4] || '.html';
+        if (!isNaN(pg) && pg >= 1 && pg < 200) {
+          u.pathname = mPage[1] + baseId + '_' + (pg + 1) + ext;
+          return { href: u.toString(), kind: 'page' };
+        }
+      }
+      // .../12062.html → .../12062_2.html
+      var mOne = path.match(/^(.*\/)(\d+)(\.[a-zA-Z0-9]+)$/);
+      if (mOne && !wantChapter) {
+        u.pathname = mOne[1] + mOne[2] + '_2' + mOne[3];
+        return { href: u.toString(), kind: 'page' };
+      }
+      if (wantChapter) {
+        var m = path.match(/^(.*\/)(\d+)(?:_(\d+))?(\.[a-zA-Z0-9]+)$/);
+        if (m) {
+          var chap = parseInt(m[2], 10);
+          var ext2 = m[4] || '.html';
+          if (!isNaN(chap)) {
+            u.pathname = m[1] + (chap + 1) + ext2;
+            return { href: u.toString(), kind: 'chapter' };
+          }
+        }
+      }
+    } catch(e){}
+    return null;
   }
-  function findNext(doc){
+
+  function findNextFromDom(doc){
     doc = doc || document;
     var links = Array.prototype.slice.call(doc.querySelectorAll('a[href]'));
-    var pageNums = [], seenN = {}, cur = 0;
-    links.forEach(function(a){
-      var tx = textOf(a).replace(/\s+/g,'');
-      if (!/^\d{1,3}$/.test(tx) || isJs(a.href)) return;
-      if (!sameHost(a.href)) return;
-      var n = parseInt(tx,10);
-      if (seenN[n]) return;
-      seenN[n]=1;
-      pageNums.push({n:n, href:a.href, el:a});
-    });
-    pageNums.sort(function(a,b){return a.n-b.n;});
-    if (pageNums.length>=2){
-      pageNums.forEach(function(p){
-        try{
-          var cls=((p.el.className||'')+' '+(p.el.parentElement&&p.el.parentElement.className||'')).toLowerCase();
-          if (/active|current|on|select|this|cur/.test(cls)||p.el.getAttribute('aria-current')) cur=p.n;
-          var st=getComputedStyle(p.el);
-          if (parseInt(st.fontWeight,10)>=600||st.fontWeight==='bold') cur=p.n;
-        }catch(e){}
-      });
+    function tx(a){ return (a.innerText||a.textContent||'').replace(/\s+/g,' ').trim(); }
+    function ok(h){
+      if(!h||h.indexOf('javascript:')===0) return false;
       try{
-        var u0=new URL(location.href);
-        ['page','p','Page','P','pageid','index','pg'].forEach(function(k){
-          if(u0.searchParams.has(k)){var nn=parseInt(u0.searchParams.get(k),10); if(!isNaN(nn)&&nn>0) cur=nn;}
-        });
-        var mPath=location.pathname.match(/_(\d+)(\.\w+)?$/);
-        if(mPath){var pn=parseInt(mPath[1],10); if(!isNaN(pn)&&pn<80) cur=pn;}
-      }catch(e){}
-      if(!cur){
-        pageNums.forEach(function(p){
-          try{ if(p.href.split('#')[0]===location.href.split('#')[0]) cur=p.n; }catch(e){}
-        });
-      }
-      if(!cur) cur=pageNums[0].n;
-      for(var i=0;i<pageNums.length;i++){
-        if(pageNums[i].n===cur+1) return {href:pageNums[i].href, kind:'page'};
-      }
+        var a=new URL(h, location.href);
+        var b=location.hostname.replace(/^www\./,'');
+        var hh=a.hostname.replace(/^www\./,'');
+        return hh===b || hh.endsWith('.'+b) || b.endsWith('.'+hh);
+      }catch(e){return false;}
     }
-    for(var j=0;j<links.length;j++){
-      var a=links[j], tx=textOf(a);
-      if(isJs(a.href)||!sameHost(a.href)) continue;
-      if(/下一页|下页|next\s*page/i.test(tx) && !/章|节|回/.test(tx)) return {href:a.href, kind:'page'};
+    for (var i=0;i<links.length;i++){
+      var t=tx(links[i]);
+      if(!ok(links[i].href)) continue;
+      if(/下一页|下页|next\s*page/i.test(t) && !/章|节|回/.test(t)) return {href:links[i].href, kind:'page'};
     }
-    try{
-      var u=new URL(location.href);
-      var keys=['page','p','Page','P','pageid','pg'];
-      for(var k=0;k<keys.length;k++){
-        if(u.searchParams.has(keys[k])){
-          var n=parseInt(u.searchParams.get(keys[k]),10);
-          if(!isNaN(n)){ u.searchParams.set(keys[k], String(n+1)); return {href:u.toString(), kind:'page'}; }
-        }
-      }
-      var m=location.pathname.match(/^(.*_)(\d+)(\.\w+)?$/);
-      if(m){
-        var num=parseInt(m[2],10);
-        if(!isNaN(num)&&num<80){
-          return {href:location.origin+m[1]+(num+1)+(m[3]||'')+location.search, kind:'page'};
-        }
-      }
-    }catch(e){}
-    // only after pages exhausted
-    for(var t=0;t<links.length;t++){
-      var a2=links[t], tx2=textOf(a2);
-      if(isJs(a2.href)||!sameHost(a2.href)) continue;
-      if(/下一[章节回]|下[一]?章|next\s*chapter/i.test(tx2)) return {href:a2.href, kind:'chapter'};
+    for (var j=0;j<links.length;j++){
+      var t2=tx(links[j]);
+      if(!ok(links[j].href)) continue;
+      if(/下一[章节回]|下[一]?章|next\s*chapter/i.test(t2)) return {href:links[j].href, kind:'chapter'};
     }
     return null;
   }
 
   function contentRoot(doc){
     doc=doc||document;
-    var sels=['#content','#Content','.content','.Content','#chaptercontent','.chapter-content','#BookText','#nr','#nr1','article','main','.read-content','.novelcontent'];
+    var sels=['#content','#Content','.content','.Content','#chaptercontent','.chapter-content','#BookText','#nr','#nr1','#chapter','#Chapter','article','main','.read-content','.novelcontent','#htmlContent','#booktxt','.showtxt'];
     var best=null, bestL=0;
     sels.forEach(function(s){
-      doc.querySelectorAll(s).forEach(function(el){
-        var L=(el.innerText||'').length;
-        if(L>bestL){bestL=L; best=el;}
-      });
+      try{
+        doc.querySelectorAll(s).forEach(function(el){
+          var L=(el.innerText||'').replace(/\s+/g,'').length;
+          if(L>bestL){bestL=L; best=el;}
+        });
+      }catch(e){}
     });
+    if(best && bestL>80) return best;
+    // densest div fallback
+    var divs=doc.querySelectorAll('div');
+    for(var i=0;i<divs.length;i++){
+      var L2=(divs[i].innerText||'').replace(/\s+/g,'').length;
+      if(L2>bestL && L2<200000){bestL=L2; best=divs[i];}
+    }
     return best || doc.body;
   }
 
@@ -650,84 +720,108 @@ class ReaderScripts {
       var doc = new DOMParser().parseFromString(html, 'text/html');
       var src = contentRoot(doc);
       if(!src) return false;
+      var text = (src.innerText||'').replace(/\s+/g,'');
+      if(text.length < 40) return false;
       var box = contentRoot(document);
       if(!box) return false;
       var wrap = document.createElement('div');
       wrap.setAttribute('data-pb-stitched','1');
-      wrap.style.cssText='border-top:2px dashed #888;margin:24px 0 8px;padding-top:16px;';
+      wrap.style.cssText='border-top:2px dashed #4a4a4a;margin:28px 0 12px;padding-top:18px;clear:both;';
       var lab = document.createElement('div');
-      lab.textContent='—— 已拼接 '+(count+1)+' · '+href;
-      lab.style.cssText='font-size:12px;color:#888;margin-bottom:12px;';
+      lab.textContent='—— 已自动拼接第 '+(count+1)+' 页 ——';
+      lab.style.cssText='font-size:12px;color:#888;margin-bottom:14px;text-align:center;';
       wrap.appendChild(lab);
       var clone = src.cloneNode(true);
-      clone.querySelectorAll('script,iframe,ins,nav,footer,header').forEach(function(n){try{n.remove();}catch(e){}});
+      clone.querySelectorAll('script,iframe,ins,nav,footer,header,style').forEach(function(n){try{n.remove();}catch(e){}});
       wrap.appendChild(clone);
       box.appendChild(wrap);
       return true;
     }catch(e){ return false; }
   }
 
+  function resolveNext(preferChapter){
+    // 1) URL arithmetic from cursor (the key for mumu-style sites)
+    var step = novelStep(cursor, !!preferChapter);
+    if(step && !seen[step.href.split('#')[0]]) return step;
+    // 2) DOM hints on live document
+    var dom = findNextFromDom(document);
+    if(dom && !seen[dom.href.split('#')[0]]) return dom;
+    // 3) if page step failed earlier, try chapter
+    if(!preferChapter){
+      var ch = novelStep(cursor, true);
+      if(ch && !seen[ch.href.split('#')[0]]) return ch;
+    }
+    return null;
+  }
+
   function loadNext(){
     if(busy || count>=MAX) return;
-    var n = findNext(document);
-    // if last stitched changed URL context, still search in last append? use document
+    var preferChapter = failStreak >= 1;
+    var n = resolveNext(preferChapter);
+    if(!n || !n.href){
+      // last try chapter once
+      n = resolveNext(true);
+    }
     if(!n || !n.href) return;
     var href = n.href.split('#')[0];
-    if(seen[href]) {
-      // try chapter only if page loop
-      if(n.kind==='page') return;
-      return;
-    }
+    if(seen[href]) return;
     seen[href]=1;
     busy=true;
-    fetch(href, {credentials:'include', headers:{'Accept':'text/html'}}).then(function(r){
+    fetch(href, {credentials:'include', headers:{'Accept':'text/html,application/xhtml+xml'}}).then(function(r){
+      if(!r.ok) throw new Error('http '+r.status);
       return r.text();
     }).then(function(html){
       if(appendFromHtml(html, href)){
         count++;
-        // rewrite location-like next finder: inject base for relative links in appended? skip
-        try{
-          // update a fake marker of current page for next findNext via history? 
-          // better: temporarily set data attribute with last href for param logic
-          document.documentElement.setAttribute('data-pb-last', href);
-        }catch(e){}
+        failStreak = 0;
+        cursor = href;
+        document.documentElement.setAttribute('data-pb-last', href);
+      } else {
+        failStreak++;
+        // page N missing → jump to next chapter from previous cursor
+        if(n.kind==='page'){
+          var ch = novelStep(cursor, true);
+          if(ch && !seen[ch.href.split('#')[0]]){
+            // don't mark busy forever
+          }
+        }
       }
       busy=false;
-    }).catch(function(){ busy=false; });
+    }).catch(function(){
+      failStreak++;
+      busy=false;
+      // if _N.html 404, advance chapter from base
+      if(n && n.kind==='page'){
+        var ch2 = novelStep(cursor, true);
+        if(ch2){
+          // allow next scroll to pick chapter
+          delete seen[ch2.href.split('#')[0]];
+        }
+      }
+    });
   }
-
-  // improve findNext using last stitched URL for page numbers
-  var _findNext = findNext;
-  findNext = function(doc){
-    var last = document.documentElement.getAttribute('data-pb-last');
-    if(last){
-      try{
-        // create temporary base for URL compare - use history state string only for param
-        var saved = location.href;
-        // can't change location; parse page from last
-        var fakeDoc = doc;
-        var n = _findNext(fakeDoc);
-        if(n) return n;
-      }catch(e){}
-    }
-    return _findNext(doc);
-  };
 
   window.addEventListener('scroll', function(){
     if(busy) return;
     var st = window.pageYOffset || document.documentElement.scrollTop || 0;
     var h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
     var vh = window.innerHeight || 800;
-    if(st + vh > h - 900) loadNext();
+    if(st + vh > h - 800) loadNext();
   }, {passive:true});
 
-  // tip once
+  // kick once near bottom for short pages
+  setTimeout(function(){
+    var h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    var vh = window.innerHeight || 800;
+    if(h < vh * 1.6) loadNext();
+  }, 1200);
+
   try{
     var tip=document.createElement('div');
-    tip.textContent='全局拼接已开 · 滑到底自动加载下一页';
-    tip.style.cssText='position:fixed;left:50%;bottom:72px;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:6px 12px;border-radius:16px;font-size:12px;z-index:2147483000;pointer-events:none;';
+    tip.textContent='全局拼接已开 · 自动 1→2→3… 再下一章';
+    tip.style.cssText='position:fixed;left:50%;bottom:72px;transform:translateX(-50%);background:rgba(0,0,0,.78);color:#fff;padding:8px 14px;border-radius:16px;font-size:12px;z-index:2147483000;pointer-events:none;';
     document.documentElement.appendChild(tip);
-    setTimeout(function(){ try{tip.remove();}catch(e){} }, 2500);
+    setTimeout(function(){ try{tip.remove();}catch(e){} }, 2800);
   }catch(e){}
 })();
 ''';

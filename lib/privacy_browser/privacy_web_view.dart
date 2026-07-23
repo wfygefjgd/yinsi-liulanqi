@@ -287,8 +287,49 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         }
         await _syncNav();
       },
+      onLongPressHitTestResult: (controller, hit) async {
+        try {
+          // extra is often the URL string for SRC_ANCHOR_TYPE / IMAGE_ANCHOR
+          var url = hit.extra?.toString().trim();
+          if (url != null &&
+              (url.startsWith('"') && url.endsWith('"'))) {
+            url = url.substring(1, url.length - 1);
+          }
+          if (url == null ||
+              url.isEmpty ||
+              !(url.startsWith('http://') || url.startsWith('https://'))) {
+            final raw = await controller.evaluateJavascript(source: r'''
+(function(){
+  try {
+    var s = window.getSelection && window.getSelection();
+    if (s && s.anchorNode) {
+      var n = s.anchorNode.nodeType===3 ? s.anchorNode.parentElement : s.anchorNode;
+      while(n && n!==document.body){
+        if(n.tagName==='A' && n.href) return n.href;
+        var h = n.getAttribute && (n.getAttribute('href')||n.getAttribute('data-href'));
+        if(h){ try{return new URL(h,location.href).href;}catch(e){return h;} }
+        n = n.parentElement;
+      }
+    }
+  } catch(e){}
+  return '';
+})();
+''');
+            url = raw?.toString() ?? '';
+            if (url.startsWith('"') && url.endsWith('"')) {
+              url = url.substring(1, url.length - 1);
+            }
+          }
+          if (url.isNotEmpty &&
+              (url.startsWith('http://') || url.startsWith('https://'))) {
+            if (!AdBlock.isAdUrl(url)) {
+              widget.onLongPressLink?.call(url, '');
+            }
+          }
+        } catch (_) {}
+      },
       onCreateWindow: (controller, createWindowAction) async {
-        // Never open popup windows (ad garbage).
+        // Never open system popup windows (ad garbage).
         return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {

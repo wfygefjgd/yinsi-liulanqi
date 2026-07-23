@@ -110,22 +110,30 @@ class _ReaderModePageState extends State<ReaderModePage> {
 
     final title = (data['title'] as String?)?.trim() ?? '';
     var html = (data['html'] as String?) ?? '';
-    // HARD rule: never jump to chapter while a page-next exists.
+    // HARD: URL arithmetic for /id.html → /id_2.html before any chapter.
+    final pageUrl = (data['url'] as String?) ?? _loadingUrl ?? widget.initialUrl;
     final nextPage = (data['nextPage'] as String?)?.trim() ?? '';
     final nextChapter = (data['nextChapter'] as String?)?.trim() ?? '';
     final kind = (data['kind'] as String?)?.trim() ?? '';
     final fallbackNext = (data['next'] as String?)?.trim() ?? '';
-    final String next;
+    String next = '';
     if (nextPage.isNotEmpty) {
       next = nextPage;
-    } else if (kind == 'page' && fallbackNext.isNotEmpty) {
-      next = fallbackNext;
-    } else if (nextChapter.isNotEmpty) {
-      next = nextChapter;
     } else {
-      next = fallbackNext;
+      final arith = _novelNextPageUrl(pageUrl);
+      if (arith != null) {
+        next = arith;
+      } else if (kind == 'page' && fallbackNext.isNotEmpty) {
+        next = fallbackNext;
+      } else if (nextChapter.isNotEmpty) {
+        next = nextChapter;
+      } else {
+        next = fallbackNext;
+        if (next.isEmpty) {
+          next = _novelNextChapterUrl(pageUrl) ?? '';
+        }
+      }
     }
-    final pageUrl = (data['url'] as String?) ?? _loadingUrl ?? widget.initialUrl;
 
     html = _sanitizeHtml(html);
     if (html.trim().isEmpty || textLen < 40) {
@@ -314,6 +322,47 @@ class _ReaderModePageState extends State<ReaderModePage> {
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;');
+
+  /// /path/12062.html → /path/12062_2.html ; /path/12062_2.html → _3
+  String? _novelNextPageUrl(String href) {
+    try {
+      final u = Uri.parse(href);
+      final path = u.path;
+      final mPage = RegExp(r'^(.*\/)(\d+)_(\d+)(\.[a-zA-Z0-9]+)?$').firstMatch(path);
+      if (mPage != null) {
+        final pg = int.tryParse(mPage.group(3)!);
+        if (pg != null && pg >= 1 && pg < 200) {
+          final ext = mPage.group(4) ?? '.html';
+          final newPath = '${mPage.group(1)}${mPage.group(2)}_${pg + 1}$ext';
+          return u.replace(path: newPath).toString();
+        }
+      }
+      final mOne = RegExp(r'^(.*\/)(\d+)(\.[a-zA-Z0-9]+)$').firstMatch(path);
+      if (mOne != null) {
+        final newPath = '${mOne.group(1)}${mOne.group(2)}_2${mOne.group(3)}';
+        return u.replace(path: newPath).toString();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// /path/12062.html or /path/12062_5.html → /path/12063.html
+  String? _novelNextChapterUrl(String href) {
+    try {
+      final u = Uri.parse(href);
+      final m = RegExp(r'^(.*\/)(\d+)(?:_(\d+))?(\.[a-zA-Z0-9]+)$')
+          .firstMatch(u.path);
+      if (m != null) {
+        final chap = int.tryParse(m.group(2)!);
+        if (chap != null) {
+          final ext = m.group(4) ?? '.html';
+          final newPath = '${m.group(1)}${chap + 1}$ext';
+          return u.replace(path: newPath).toString();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
