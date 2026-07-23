@@ -35,7 +35,6 @@ class PrivacyWebView extends StatefulWidget {
   final bool crossSiteBlock;
   final bool desktopMode;
   final void Function(String selector, String pageUrl)? onUserHide;
-  final void Function(String url, String title)? onLongPressLink;
   /// Long-press link → open in in-app popup sheet.
   final void Function(String url, String title)? onLongPressLink;
 

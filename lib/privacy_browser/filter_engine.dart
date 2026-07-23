@@ -225,10 +225,6 @@ class FilterEngine {
     return status;
   }
 
-  static void _bind() {
-    AdBlock.onlineBlocker = shouldBlockOnlineOnly;
-  }
-
   static int get hostCount => _hosts.length;
   static int get pathCount => _paths.length;
 }
