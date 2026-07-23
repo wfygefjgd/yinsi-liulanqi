@@ -5,7 +5,7 @@ import 'package:yinsi_liulanqi/privacy_browser/privacy_browser_shell.dart';
 import 'package:yinsi_liulanqi/privacy_browser/tab_manager.dart';
 
 void main() {
-  testWidgets('classic shell builds', (tester) async {
+  testWidgets('Safari shell builds', (tester) async {
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => TabManager(maxTabs: 8),
@@ -13,6 +13,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text('搜索或输入网址'), findsOneWidget);
+    expect(find.text('搜索或输入网站名称'), findsOneWidget);
+    expect(find.text('隐私浏览器'), findsOneWidget);
   });
 }
