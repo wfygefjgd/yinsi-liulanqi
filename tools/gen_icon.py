@@ -1,4 +1,4 @@
-"""Generate privacy-browser app icons (stdlib only)."""
+"""Generate circular ring app icons (stdlib only)."""
 from __future__ import annotations
 
 import math
@@ -29,90 +29,65 @@ def write_png(path: Path, w: int, h: int, rgba: bytes) -> None:
     path.write_bytes(png)
 
 
-def lerp(a: float, b: float, t: float) -> float:
-    return a + (b - a) * t
-
-
 def clamp(v: int) -> int:
     return 0 if v < 0 else 255 if v > 255 else v
 
 
-def point_in_rounded_rect(x: float, y: float, size: float, radius: float) -> float:
-    """Return coverage 0..1 for rounded square [0,size)."""
-    if x < 0 or y < 0 or x >= size or y >= size:
-        return 0.0
-    # distance to edge inside
-    dx = min(x + 0.5, size - (x + 0.5))
-    dy = min(y + 0.5, size - (y + 0.5))
-    if dx >= radius or dy >= radius:
-        return 1.0
-    ox = radius - dx
-    oy = radius - dy
-    dist = math.hypot(ox, oy)
-    if dist <= radius - 0.6:
-        return 1.0
-    if dist >= radius + 0.6:
-        return 0.0
-    return max(0.0, min(1.0, (radius + 0.6 - dist) / 1.2))
-
-
-def in_shield(nx: float, ny: float) -> bool:
-    """Normalized 0..1 coords; classic shield silhouette."""
-    # outer shield
-    if ny < 0.18 or ny > 0.84:
-        return False
-    if ny <= 0.30:
-        # flat top with slight dome
-        half = 0.30
-        return abs(nx - 0.5) <= half and ny >= 0.18
-    if ny <= 0.62:
-        half = 0.30
-        return abs(nx - 0.5) <= half
-    # taper to point
-    t = (ny - 0.62) / (0.84 - 0.62)
-    half = 0.30 * (1.0 - t)
-    return abs(nx - 0.5) <= half + 0.01
-
-
 def gen_icon(size: int) -> bytes:
+    """Transparent square, soft blue circular ring (iOS will still mask, looks round)."""
     px = bytearray(size * size * 4)
-    radius = size * 0.2237  # iOS-ish continuous corner
+    cx = cy = (size - 1) / 2.0
+    outer = size * 0.42
+    inner = size * 0.28
+    edge = 0.9  # soft anti-alias band in px
+
     for y in range(size):
         for x in range(size):
-            a = point_in_rounded_rect(x, y, size, radius)
-            t = (x + y) / (2 * max(size - 1, 1))
-            # gradient #5AC8FA -> #0A84FF
-            cr = int(lerp(0x5A, 0x0A, t))
-            cg = int(lerp(0xC8, 0x84, t))
-            cb = int(lerp(0xFA, 0xFF, t))
+            dx = (x + 0.5) - cx
+            dy = (y + 0.5) - cy
+            d = math.hypot(dx, dy)
 
-            nx = (x + 0.5) / size
-            ny = (y + 0.5) / size
-            if a > 0 and in_shield(nx, ny):
-                # white shield body
-                cr, cg, cb = 255, 255, 255
-                # blue check: short stroke + long stroke
-                # vertical-ish long bar
-                # simplified: small lock circle + body
-                # draw a simple padlock silhouette in blue
-                # shackle arc
-                scx, scy, sr = 0.5, 0.40, 0.09
-                dist_c = math.hypot(nx - scx, ny - scy)
-                if 0.34 <= ny <= 0.42 and abs(nx - 0.5) <= 0.10:
-                    if dist_c >= sr * 0.75 and dist_c <= sr * 1.15 and ny <= scy + 0.02:
-                        cr, cg, cb = 0x0A, 0x84, 0xFF
-                # lock body
-                if 0.42 <= ny <= 0.62 and abs(nx - 0.5) <= 0.12:
-                    cr, cg, cb = 0x0A, 0x84, 0xFF
-                # keyhole
-                if 0.48 <= ny <= 0.56 and abs(nx - 0.5) <= 0.03:
-                    cr, cg, cb = 255, 255, 255
+            # ring coverage with soft edges
+            a = 0.0
+            if d <= outer + edge and d >= inner - edge:
+                # outer falloff
+                if d > outer:
+                    a = max(0.0, 1.0 - (d - outer) / edge)
+                elif d < inner:
+                    a = max(0.0, 1.0 - (inner - d) / edge)
+                else:
+                    a = 1.0
+                # slight thickness highlight
+                mid = (inner + outer) / 2.0
+                ring_t = 1.0 - abs(d - mid) / max((outer - inner) / 2.0, 1e-6)
+                ring_t = max(0.0, min(1.0, ring_t))
+
+                # gradient by angle: cyan -> blue
+                ang = (math.atan2(dy, dx) + math.pi) / (2 * math.pi)  # 0..1
+                # #5AC8FA -> #0A84FF
+                cr = int(0x5A + (0x0A - 0x5A) * ang)
+                cg = int(0xC8 + (0x84 - 0xC8) * ang)
+                cb = int(0xFA + (0xFF - 0xFA) * ang)
+                # brighter on outer rim
+                boost = 0.85 + 0.15 * ring_t
+                cr = clamp(int(cr * boost))
+                cg = clamp(int(cg * boost))
+                cb = clamp(int(cb * boost))
+            else:
+                cr = cg = cb = 0
+                a = 0.0
+
+            # subtle center glow (very soft) for depth, still circular
+            if d < inner - edge:
+                glow = max(0.0, 1.0 - d / max(inner, 1e-6)) * 0.12
+                cr, cg, cb = 0x0A, 0x84, 0xFF
+                a = glow
 
             i = (y * size + x) * 4
-            px[i] = clamp(cr)
-            px[i + 1] = clamp(cg)
-            px[i + 2] = clamp(cb)
-            px[i + 3] = int(255 * a)
+            px[i] = cr
+            px[i + 1] = cg
+            px[i + 2] = cb
+            px[i + 3] = clamp(int(255 * a))
     return bytes(px)
 
 
@@ -152,7 +127,7 @@ def main() -> None:
             s,
             gen_icon(s),
         )
-    print("ok icons", len(ios_sizes), "+", len(android))
+    print("ok circular ring icons")
 
 
 if __name__ == "__main__":

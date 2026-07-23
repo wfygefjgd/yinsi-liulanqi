@@ -29,7 +29,8 @@ import WebKit
           result(nil)
         }
       case "exitApp":
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        // Flutter already faded to black; wait then exit quietly.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
           exit(0)
         }
         result(nil)

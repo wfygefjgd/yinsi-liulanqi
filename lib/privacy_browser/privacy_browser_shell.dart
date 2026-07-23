@@ -55,17 +55,25 @@ class PrivacyBrowserShell extends StatefulWidget {
 }
 
 class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _addressCtrl = TextEditingController();
   final _addressFocus = FocusNode();
   final Map<String, InAppWebViewController> _controllers = {};
   bool _resetting = false;
   bool _backgroundWiped = false;
   bool _showTabs = false;
+  bool _exiting = false;
+  late final AnimationController _exitFade;
+  late final Animation<double> _exitOpacity;
 
   @override
   void initState() {
     super.initState();
+    _exitFade = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
+    );
+    _exitOpacity = CurvedAnimation(parent: _exitFade, curve: Curves.easeInOut);
     WidgetsBinding.instance.addObserver(this);
     _addressCtrl.text = context.read<TabManager>().active.addressText;
   }
@@ -73,6 +81,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _exitFade.dispose();
     _addressCtrl.dispose();
     _addressFocus.dispose();
     super.dispose();
@@ -80,14 +89,51 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
+    // inactive: user swiping away / app switcher — start graceful fade early.
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
-      if (_backgroundWiped || _resetting) return;
+      if (_backgroundWiped || _resetting || _exiting) return;
       _backgroundWiped = true;
-      _controllers.clear();
-      PrivacyEngine.resetAndRelaunch();
+      _gracefulExit(message: '正在安全退出…');
     }
+  }
+
+  /// Fade to black, blank webviews, wipe, then cold exit — no crash flash.
+  Future<void> _gracefulExit({required String message}) async {
+    if (_exiting) return;
+    _exiting = true;
+    if (mounted) {
+      setState(() {
+        _resetting = true;
+        _showTabs = false;
+      });
+    }
+    try {
+      await _exitFade.forward();
+    } catch (_) {}
+
+    // Stop pages before wipe so content doesn't flash.
+    for (final c in _controllers.values) {
+      try {
+        await c.stopLoading();
+      } catch (_) {}
+      try {
+        await c.loadUrl(urlRequest: URLRequest(url: WebUri('about:blank')));
+      } catch (_) {}
+    }
+    _controllers.clear();
+    if (mounted) {
+      try {
+        context.read<TabManager>().hardResetTabs();
+      } catch (_) {}
+      _addressCtrl.clear();
+    }
+
+    // Hold on solid black a beat so system transition feels intentional.
+    await Future<void>.delayed(const Duration(milliseconds: 280));
+    await PrivacyEngine.resetAndRelaunch();
   }
 
   InAppWebViewController? get _activeController {
@@ -146,13 +192,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   }
 
   Future<void> _runHardReset() async {
-    if (_resetting) return;
-    setState(() => _resetting = true);
-    _controllers.clear();
-    context.read<TabManager>().hardResetTabs();
-    _addressCtrl.clear();
-    await PrivacyEngine.resetAndRelaunch();
-    if (mounted) setState(() => _resetting = false);
+    if (_resetting || _exiting) return;
+    await _gracefulExit(message: '正在换新身份…');
   }
 
   void _syncAddressFromTab() {
@@ -327,20 +368,43 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
               ),
             ],
           ),
-          if (_resetting)
-            const ColoredBox(
-              color: Color(0xCC000000),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: _C.accent),
-                    SizedBox(height: 16),
-                    Text('正在换新身份…', style: TextStyle(color: Colors.white70)),
-                  ],
+          // Graceful exit overlay: slow fade to black (not a crash flash).
+          FadeTransition(
+            opacity: _exitOpacity,
+            child: IgnorePointer(
+              ignoring: !_resetting && !_exiting,
+              child: ColoredBox(
+                color: _C.bg,
+                child: Center(
+                  child: Opacity(
+                    opacity: _resetting || _exiting ? 1 : 0,
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: _C.accent,
+                          ),
+                        ),
+                        SizedBox(height: 18),
+                        Text(
+                          '安全退出中',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 15,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
@@ -603,14 +667,13 @@ class _SafariStartPage extends StatelessWidget {
                   children: [
                     const Spacer(flex: 2),
                     Container(
-                      width: 72,
-                      height: 72,
+                      width: 78,
+                      height: 78,
                       decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(18),
-                        gradient: const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [Color(0xFF5AC8FA), Color(0xFF0A84FF)],
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _C.accent,
+                          width: 6,
                         ),
                         boxShadow: [
                           BoxShadow(
@@ -620,10 +683,15 @@ class _SafariStartPage extends StatelessWidget {
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.shield_rounded,
-                        size: 36,
-                        color: Colors.white,
+                      child: Center(
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _C.accent.withOpacity(0.35),
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),

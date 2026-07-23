@@ -23,8 +23,11 @@ class MainActivity : FlutterActivity() {
                     }
                     "exitApp" -> {
                         result.success(null)
-                        finishAffinity()
-                        Process.killProcess(Process.myPid())
+                        // Soft exit after Flutter fade (no crash-like flash).
+                        window.decorView.postDelayed({
+                            finishAndRemoveTask()
+                            Process.killProcess(Process.myPid())
+                        }, 550)
                     }
                     else -> result.notImplemented()
                 }
