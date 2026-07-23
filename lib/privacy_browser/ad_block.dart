@@ -1,23 +1,25 @@
-/// Real ad / tracker host + path rules (EasyList-style subset, offline).
+/// Ad / tracker URL detection (offline list + path heuristics).
 class AdBlock {
   AdBlock._();
 
-  /// Host contains any of these → block resource / optional nav.
+  /// Substrings matched against host or full URL (lowercase).
   static const hostHints = <String>[
+    // Google
     'doubleclick.net',
     'googlesyndication.com',
     'googleadservices.com',
     'googletagmanager.com',
     'googletagservices.com',
     'google-analytics.com',
-    'securepubads.g.doubleclick.net',
-    'pagead2.googlesyndication.com',
-    'fundingchoicesmessages.google.com',
-    'facebook.net',
-    'facebook.com/tr',
-    'connect.facebook.net',
-    'adservice.google',
+    'securepubads.g.doubleclick',
     'pagead2.googlesyndication',
+    'fundingchoicesmessages.google',
+    'adservice.google',
+    'partner.googleadservices',
+    // Meta
+    'facebook.net',
+    'connect.facebook.net',
+    // Common ad networks
     'adnxs.com',
     'adsrvr.org',
     'adsafeprotected.com',
@@ -46,53 +48,35 @@ class AdBlock {
     'media.net',
     'adsymptotic.com',
     'ads-twitter.com',
-    'analytics.twitter.com',
     'static.ads-twitter.com',
+    // CN
     'gdt.qq.com',
-    'l.qq.com',
     'mi.gdt.qq.com',
     'wxsnsdy.tc.qq.com',
+    'l.qq.com',
+    'pgdt.gtimg.cn',
     'pangolin-sdk-toutiao.com',
     'pglstatp-toutiao.com',
-    'bytead.com',
+    'bytead',
     'snssdk.com',
-    'baidu.com/cpro',
     'pos.baidu.com',
     'cpro.baidu.com',
     'hm.baidu.com',
+    'eclick.baidu.com',
     'tanx.com',
-    'alicdn.com/js/mm',
     'cnzz.com',
     'umeng.com',
     'umengcloud.com',
     'growingio.com',
     'jiguang.cn',
     'getui.com',
-    'xg.qq.com',
     'beacon.qq.com',
     'pingjs.qq.com',
     'lianmeng.360.cn',
     'mediav.com',
-    'ironsrc.com',
-    'unityads.unity3d.com',
-    'applovin.com',
-    'mopub.com',
-    'inmobi.com',
-    'vungle.com',
-    'chartboost.com',
-    'supersonicads.com',
-    'ads.yahoo.com',
-    'adtechus.com',
-    'advertising.yahoo.com',
-    'zedo.com',
-    'smartadserver.com',
-    'lijit.com',
-    'sovrn.com',
-    'contextweb.com',
-    '33across.com',
-    'teads.tv',
-    'mgid.com',
-    'revcontent.com',
+    'union.uc',
+    'ad.qq.com',
+    // Adult / pop networks (common junk)
     'popads.net',
     'popcash.net',
     'propellerads.com',
@@ -104,11 +88,18 @@ class AdBlock {
     'tsyndicate.com',
     'hilltopads.com',
     'clickadu.com',
-    'adnxs',
+    'trafficstars.com',
+    'ad-maven.com',
+    'pushwoosh.com',
+    'onesignal.com',
+    'pushengage.com',
+    'mgid.com',
+    'revcontent.com',
+    'zedo.com',
+    'smartadserver.com',
+    'teads.tv',
+    // generic tokens (host only match to reduce false positives)
     'adsystem',
-    'pagead',
-    'adservice',
-    'partner.googleadservices',
   ];
 
   static const pathHints = <String>[
@@ -125,16 +116,25 @@ class AdBlock {
     '/adsbygoogle',
     '/adframe',
     '/adserver',
-    '/track.',
-    '/tracking',
+    '/ad.js',
+    '/ads.js',
     '/pixel.',
     '/beacon',
     '/collect?',
-    '/analytics',
     '/gtm.js',
     '/ga.js',
     '/tag.js',
+    'doubleclick',
+    'googlesyndication',
   ];
+
+  /// Landing / redirect patterns often used by junk ads (full URL).
+  static final _junkLanding = RegExp(
+    r'(popunder|popads|clickadu|exoclick|juicyads|hilltopads|adsterra|'
+    r'go\.php\?|redirect\.php|out\.php|jump\.php|clk\.|click\?|'
+    r'utm_source=ads|zoneid=|ad_id=|bannerid=)',
+    caseSensitive: false,
+  );
 
   static bool isAdUrl(String? raw) {
     if (raw == null || raw.isEmpty) return false;
@@ -149,25 +149,41 @@ class AdBlock {
     try {
       u = Uri.parse(raw);
     } catch (_) {
-      return false;
+      return _junkLanding.hasMatch(lower);
     }
     final host = u.host.toLowerCase();
-    final path = '${u.path}?${u.query}'.toLowerCase();
+    final pathQ = '${u.path}?${u.query}'.toLowerCase();
+    final full = lower;
+
+    // Never treat empty host as ad
+    if (host.isEmpty) return false;
+
     for (final h in hostHints) {
-      if (host.contains(h) || lower.contains(h)) return true;
+      if (host.contains(h)) return true;
     }
     for (final p in pathHints) {
-      if (path.contains(p)) return true;
+      if (pathQ.contains(p) || full.contains(p)) return true;
+    }
+    if (_junkLanding.hasMatch(full)) return true;
+
+    // Host starts with ad. / ads. / adserv
+    if (RegExp(r'^(ads?|adserv|adserver|adn|adx)\.').hasMatch(host)) {
+      return true;
     }
     return false;
   }
 
-  /// Same registrable-ish host family (e.g. a.com / www.a.com / m.a.com).
+  /// Same registrable-ish host family (a.com / www.a.com / m.a.com).
   static String rootish(String host) {
-    final h = host.toLowerCase().replaceFirst(RegExp(r'^www\.'), '');
+    var h = host.toLowerCase();
+    for (final p in ['www.', 'm.', 'mobile.', 'wap.', 'www1.', 'www2.']) {
+      if (h.startsWith(p)) {
+        h = h.substring(p.length);
+        break;
+      }
+    }
     final parts = h.split('.').where((e) => e.isNotEmpty).toList();
     if (parts.length <= 2) return h;
-    // co.uk / com.cn style
     final last2 = parts.sublist(parts.length - 2).join('.');
     if (parts.length >= 3 &&
         (parts[parts.length - 2] == 'co' ||

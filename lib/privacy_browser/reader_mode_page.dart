@@ -110,12 +110,21 @@ class _ReaderModePageState extends State<ReaderModePage> {
 
     final title = (data['title'] as String?)?.trim() ?? '';
     var html = (data['html'] as String?) ?? '';
-    // Prefer in-chapter next page (1→2→3), then next chapter.
+    // HARD rule: never jump to chapter while a page-next exists.
     final nextPage = (data['nextPage'] as String?)?.trim() ?? '';
     final nextChapter = (data['nextChapter'] as String?)?.trim() ?? '';
-    final next = nextPage.isNotEmpty
-        ? nextPage
-        : ((data['next'] as String?)?.trim() ?? nextChapter);
+    final kind = (data['kind'] as String?)?.trim() ?? '';
+    final fallbackNext = (data['next'] as String?)?.trim() ?? '';
+    final String next;
+    if (nextPage.isNotEmpty) {
+      next = nextPage;
+    } else if (kind == 'page' && fallbackNext.isNotEmpty) {
+      next = fallbackNext;
+    } else if (nextChapter.isNotEmpty) {
+      next = nextChapter;
+    } else {
+      next = fallbackNext;
+    }
     final pageUrl = (data['url'] as String?) ?? _loadingUrl ?? widget.initialUrl;
 
     html = _sanitizeHtml(html);
@@ -176,7 +185,7 @@ class _ReaderModePageState extends State<ReaderModePage> {
       _stitching = false;
       _extractAttempts = attempt;
       _status = _pendingNext == null
-          ? '共 ${_parts.length} 段 · 已到底'
+          ? '共 ${_parts.length} 段 · 已到底（无下一页/章）'
           : '共 ${_parts.length} 段 · 滚动或点 → 加载下一章';
       _error = null;
     });

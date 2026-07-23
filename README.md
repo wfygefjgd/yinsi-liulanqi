@@ -12,7 +12,7 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - Bundle ID: `com.tongyong.browser`（独立包名，不会覆盖旧测试包 / PHUB Player）
 - 显示名: 隐私浏览器
-- 版本: **1.6.2** (Build 20)
+- 版本: **1.6.3** (Build 21)
 - 包体: 未签名（适合侧载）
 
 ## 功能

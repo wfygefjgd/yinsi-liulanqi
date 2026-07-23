@@ -5,8 +5,8 @@ class ReaderScripts {
   /// Stronger runtime ad/popup/DOM cleanup + early CSS cosmetic.
   static const adAndPopupBlock = r'''
 (function(){
-  if (window.__pbAdBlockV3) return;
-  window.__pbAdBlockV3 = true;
+  if (window.__pbAdBlockV4) return;
+  window.__pbAdBlockV4 = true;
 
   // Kill popup APIs hard
   try {
@@ -41,24 +41,37 @@ class ReaderScripts {
       '[class*="guanggao"],[id*="guanggao"],.ads,.ad,.AD,',
       '#ads,#ad,#AD,#googlead,#div_ad,',
       '[class*="mask"],[class*="overlay"][style*="z-index"],',
-      '[class*="layui-layer"],[class*="layui-m"],.van-overlay,.mui-popup,',
-      'a[target="_blank"][href*="http"]:not([href*="'+location.hostname+'"])'
+      '[class*="layui-layer"],[class*="layui-m"],.van-overlay,.mui-popup'
     ].join('') + '{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;pointer-events:none!important;opacity:0!important;}';
     (document.documentElement||document.head||document.body).appendChild(st);
   } catch(e){}
 
-  // Neutralize target=_blank and obvious ad clicks
+  function hostRoot(h){
+    h = (h||'').toLowerCase().replace(/^www\./,'');
+    var p = h.split('.');
+    if (p.length <= 2) return h;
+    return p.slice(-2).join('.');
+  }
+  var myRoot = hostRoot(location.hostname);
+
+  // Same tab only; block clicks that leave site or hit ad hosts
   document.addEventListener('click', function(ev){
     try {
       var a = ev.target && ev.target.closest && ev.target.closest('a,area');
       if (!a) return;
       if (a.target === '_blank') a.target = '_self';
       var href = a.href || '';
-      if (href && /doubleclick|googlesyndication|pagead|adservice|exoclick|popads|juicyads|gdt\.qq|lianmeng|pos\.baidu/i.test(href)) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        return false;
+      if (!href || href.indexOf('javascript:')===0) return;
+      if (/doubleclick|googlesyndication|pagead|adservice|exoclick|popads|juicyads|gdt\.qq|lianmeng|pos\.baidu|hilltopads|adsterra|propeller|clickadu|trafficjunky/i.test(href)) {
+        ev.preventDefault(); ev.stopPropagation(); return false;
       }
+      try {
+        var u = new URL(href, location.href);
+        if (u.protocol.indexOf('http')===0 && hostRoot(u.hostname) !== myRoot) {
+          // leave-site click: block (native layer also blocks)
+          ev.preventDefault(); ev.stopPropagation(); return false;
+        }
+      } catch(e){}
     } catch(e){}
   }, true);
 

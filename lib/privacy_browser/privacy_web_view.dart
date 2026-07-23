@@ -20,7 +20,8 @@ class PrivacyWebView extends StatefulWidget {
     required this.onControllerReady,
     this.popupBlock = true,
     this.adBlock = true,
-    this.crossSiteBlock = false,
+    /// true = page may only navigate within same site root; other hosts blocked.
+    this.crossSiteBlock = true,
     this.desktopMode = false,
     this.onUserHide,
   });
@@ -41,6 +42,7 @@ class PrivacyWebView extends StatefulWidget {
 class _PrivacyWebViewState extends State<PrivacyWebView>
     with AutomaticKeepAliveClientMixin {
   InAppWebViewController? _controller;
+  /// Locked site root (e.g. example.com) after first intentional load.
   String? _siteRoot;
 
   InAppWebViewSettings get _settings {
@@ -70,7 +72,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           ? UserPreferredContentMode.DESKTOP
           : UserPreferredContentMode.MOBILE,
       saveFormData: false,
-      // Allow normal navigation; block only true popups via onCreateWindow.
       javaScriptCanOpenWindowsAutomatically: false,
       supportMultipleWindows: false,
       useShouldOverrideUrlLoading: true,
@@ -84,6 +85,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       list.add(UserScript(
         source: ReaderScripts.adAndPopupBlock,
         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      ));
+      list.add(UserScript(
+        source: ReaderScripts.adAndPopupBlock,
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
       ));
     }
     return UnmodifiableListView(list);
@@ -114,11 +119,14 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     try {
       final h = Uri.parse(url).host;
       if (h.isEmpty) return;
+      // Never lock onto a known ad host as the "home" site.
+      if (AdBlock.isAdUrl(url)) return;
       _siteRoot = AdBlock.rootish(h);
     } catch (_) {}
   }
 
-  bool _isCrossSite(String url) {
+  /// true = different site root than locked page (ad landers, random domains).
+  bool _isOtherSite(String url) {
     if (_siteRoot == null) return false;
     try {
       final h = Uri.parse(url).host;
@@ -142,7 +150,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         );
       } catch (_) {}
     }
-    // Re-apply user manual hides for this host
     try {
       final url = widget.tab.url;
       final sels = await HideStore.selectorsForUrl(url);
@@ -209,21 +216,18 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       },
       onLoadStop: (controller, url) async {
         await _inject(controller);
-        Future<void>.delayed(const Duration(milliseconds: 500), () async {
-          try {
-            await _inject(controller);
-          } catch (_) {}
-        });
-        Future<void>.delayed(const Duration(milliseconds: 1500), () async {
-          try {
-            await _inject(controller);
-          } catch (_) {}
-        });
+        for (final ms in [400, 1000, 2500]) {
+          Future<void>.delayed(Duration(milliseconds: ms), () async {
+            try {
+              await _inject(controller);
+            } catch (_) {}
+          });
+        }
         widget.tab.isLoading = false;
         widget.tab.progress = 100;
         final s = url?.toString() ?? '';
         if (s.isNotEmpty) {
-          if (_siteRoot == null) _lockSiteFrom(s);
+          if (_siteRoot == null && !AdBlock.isAdUrl(s)) _lockSiteFrom(s);
           widget.tab.url = s;
           if (s != 'about:blank') widget.tab.addressText = s;
         }
@@ -250,12 +254,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        // Popup windows blocked; user can long-press for system open if needed.
-        final u = createWindowAction.request.url;
-        if (u != null && !AdBlock.isAdUrl(u.toString())) {
-          // Soft: open same tab instead of new window
-          await controller.loadUrl(urlRequest: URLRequest(url: u));
-        }
+        // Never open popup windows (ad garbage).
         return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
@@ -270,42 +269,40 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           return NavigationActionPolicy.ALLOW;
         }
 
-        // Always block hard-ad navigations (main or sub).
+        // 1) Ad / tracker URLs — always block (main + iframe).
         if (widget.adBlock && AdBlock.isAdUrl(url)) {
           return NavigationActionPolicy.CANCEL;
         }
 
         final isMain = navigationAction.isForMainFrame ?? true;
-        if (!isMain) return NavigationActionPolicy.ALLOW;
 
-        // Address bar / bookmark
-        if (widget.tab.allowCrossSiteOnce) {
+        // 2) Address bar / bookmark — user may go anywhere once.
+        if (isMain && widget.tab.allowCrossSiteOnce) {
           _siteRoot = null;
           _lockSiteFrom(url);
           widget.tab.allowCrossSiteOnce = false;
           return NavigationActionPolicy.ALLOW;
         }
 
-        if (_siteRoot == null || widget.tab.isBlank) {
+        // 3) First page in empty tab — lock site, allow.
+        if (isMain && (_siteRoot == null || widget.tab.isBlank)) {
           _lockSiteFrom(url);
           return NavigationActionPolicy.ALLOW;
         }
 
-        // Default: ALLOW almost all main-frame navigations (normal browsing).
-        // Optional cross-site mode: only cancel silent auto redirects to other roots.
-        if (widget.crossSiteBlock && _isCrossSite(url)) {
-          final gesture = navigationAction.hasGesture;
-          // iOS often reports null for hasGesture — treat null as allow.
-          if (gesture == false) {
-            return NavigationActionPolicy.CANCEL;
-          }
-          _lockSiteFrom(url);
-        } else if (!_isCrossSite(url)) {
-          // same site ok
-        } else {
-          _lockSiteFrom(url);
+        // 4) Same site (www / m / path) — always allow continuous browsing.
+        if (!_isOtherSite(url)) {
+          return NavigationActionPolicy.ALLOW;
         }
 
+        // 5) Other site from page content — HARD BLOCK when feature on.
+        //    This is the product: 自己站能跳，别的站（含广告站）不能跳。
+        if (widget.crossSiteBlock) {
+          return NavigationActionPolicy.CANCEL;
+        }
+
+        // Feature off: allow leave and re-lock.
+        if (isMain) _lockSiteFrom(url);
         return NavigationActionPolicy.ALLOW;
       },
       shouldInterceptRequest: (controller, request) async {
