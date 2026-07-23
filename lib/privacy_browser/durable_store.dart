@@ -63,6 +63,8 @@ class DurableStore {
   static Map<String, dynamic> get _defaults => {
         'stitchEnabled': true,
         'popupBlockEnabled': true,
+        'adBlockEnabled': true,
+        'crossSiteBlockEnabled': true,
         'desktopMode': false,
       };
 
@@ -101,6 +103,28 @@ class DurableStore {
   static Future<void> setPopupBlockEnabled(bool v) async {
     final s = await loadSettings();
     s['popupBlockEnabled'] = v;
+    await saveSettings(s);
+  }
+
+  static Future<bool> getAdBlockEnabled() async {
+    final s = await loadSettings();
+    return s['adBlockEnabled'] != false;
+  }
+
+  static Future<void> setAdBlockEnabled(bool v) async {
+    final s = await loadSettings();
+    s['adBlockEnabled'] = v;
+    await saveSettings(s);
+  }
+
+  static Future<bool> getCrossSiteBlockEnabled() async {
+    final s = await loadSettings();
+    return s['crossSiteBlockEnabled'] != false;
+  }
+
+  static Future<void> setCrossSiteBlockEnabled(bool v) async {
+    final s = await loadSettings();
+    s['crossSiteBlockEnabled'] = v;
     await saveSettings(s);
   }
 

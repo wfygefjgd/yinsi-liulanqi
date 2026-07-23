@@ -145,23 +145,23 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.5.1
-          name: 隐私浏览器 iOS v1.5.1
+          tag_name: v1.5.2
+          name: 隐私浏览器 iOS v1.5.2
           body: |
-            ## 隐私浏览器 iOS v1.5.1
+            ## 隐私浏览器 iOS v1.5.2
 
             未签名 IPA · 全能签 / Sideloadly / AltStore / TrollStore
 
             ### 版本
-            - **Version**: 1.5.1 · **Build**: 16
-            - **Bundle ID**: `com.tongyong.browser`（新包名，不覆盖旧测试包）
+            - **Version**: 1.5.2 · **Build**: 17
+            - **Bundle ID**: `com.tongyong.browser`
 
-            ### 本版入口
-            - 地址栏左 **★** 一键收藏（不进输入；最多 50）
-            - **≡** 菜单：全局拼接 / 桌面模式 / 弹窗拦截 / 分享 / 复制链接 / 书签 / 标签
-            - **左下角「阅读」** 手动进阅读模式
-            - 标签最多 15；进后台清痕迹，书签保留
-            - 已去掉右下角换新身份（上滑/切任务即清）
+            ### 真功能（非仅 UI）
+            - **跨站拦截**：页面内跳到其它网站直接取消；地址栏/书签可跳
+            - **广告拦截**：域名/路径规则 + 资源拦截 + DOM 清理
+            - **弹窗拦截**：禁止新窗口 + 清理遮罩
+            - **阅读模式**：真加载页→抽正文→干净排版；失败可重试；拼接跟全局开关
+            - ★ 收藏 / ≡ 菜单 / 左下角阅读；书签50·标签15；后台清痕迹
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

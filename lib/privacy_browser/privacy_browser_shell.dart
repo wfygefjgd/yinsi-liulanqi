@@ -68,6 +68,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   bool _exiting = false;
   bool _stitchEnabled = true;
   bool _popupBlock = true;
+  bool _adBlock = true;
+  bool _crossSiteBlock = true;
   bool _desktopMode = false;
   late final AnimationController _exitFade;
   late final Animation<double> _exitOpacity;
@@ -88,11 +90,15 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   Future<void> _loadSettings() async {
     final stitch = await DurableStore.getStitchEnabled();
     final popup = await DurableStore.getPopupBlockEnabled();
+    final ad = await DurableStore.getAdBlockEnabled();
+    final cross = await DurableStore.getCrossSiteBlockEnabled();
     final desk = await DurableStore.getDesktopMode();
     if (!mounted) return;
     setState(() {
       _stitchEnabled = stitch;
       _popupBlock = popup;
+      _adBlock = ad;
+      _crossSiteBlock = cross;
       _desktopMode = desk;
     });
   }
@@ -169,6 +175,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     }
     final c = _activeController;
     if (c == null) return;
+    // User-initiated: allow leaving current site once (address bar / search).
+    context.read<TabManager>().active.allowCrossSiteOnce = true;
     await c.loadUrl(urlRequest: URLRequest(url: uri));
     _addressFocus.unfocus();
     if (mounted) setState(() => _showTabs = false);
@@ -280,10 +288,19 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     await DurableStore.setPopupBlockEnabled(v);
   }
 
+  Future<void> _setAdBlock(bool v) async {
+    setState(() => _adBlock = v);
+    await DurableStore.setAdBlockEnabled(v);
+  }
+
+  Future<void> _setCrossSite(bool v) async {
+    setState(() => _crossSiteBlock = v);
+    await DurableStore.setCrossSiteBlockEnabled(v);
+  }
+
   Future<void> _setDesktop(bool v) async {
     setState(() => _desktopMode = v);
     await DurableStore.setDesktopMode(v);
-    // WebViews pick up via rebuild
   }
 
   void _syncAddressFromTab() {
@@ -357,6 +374,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             tab: t,
                             desktopMode: _desktopMode,
                             popupBlock: _popupBlock,
+                            adBlock: _adBlock,
+                            crossSiteBlock: _crossSiteBlock,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
@@ -585,13 +604,52 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                   SwitchListTile.adaptive(
                     title: const Text('拼接', style: TextStyle(color: _C.text)),
                     subtitle: const Text(
-                      '全局开关：阅读模式自动拼下一章',
+                      '全局：阅读模式自动拼下一章',
                       style: TextStyle(color: _C.secondary, fontSize: 12),
                     ),
                     value: _stitchEnabled,
                     activeColor: _C.accent,
                     onChanged: (v) async {
                       await _setStitch(v);
+                      setModal(() {});
+                    },
+                  ),
+                  SwitchListTile.adaptive(
+                    title: const Text('广告拦截', style: TextStyle(color: _C.text)),
+                    subtitle: const Text(
+                      '拦截广告域名/脚本/资源（真拦截）',
+                      style: TextStyle(color: _C.secondary, fontSize: 12),
+                    ),
+                    value: _adBlock,
+                    activeColor: _C.accent,
+                    onChanged: (v) async {
+                      await _setAdBlock(v);
+                      setModal(() {});
+                    },
+                  ),
+                  SwitchListTile.adaptive(
+                    title: const Text('跨站拦截', style: TextStyle(color: _C.text)),
+                    subtitle: const Text(
+                      '阻止页面跳到其它网站（地址栏/书签可跳）',
+                      style: TextStyle(color: _C.secondary, fontSize: 12),
+                    ),
+                    value: _crossSiteBlock,
+                    activeColor: _C.accent,
+                    onChanged: (v) async {
+                      await _setCrossSite(v);
+                      setModal(() {});
+                    },
+                  ),
+                  SwitchListTile.adaptive(
+                    title: const Text('弹窗清理', style: TextStyle(color: _C.text)),
+                    subtitle: const Text(
+                      '屏蔽 window.open 与遮罩弹层',
+                      style: TextStyle(color: _C.secondary, fontSize: 12),
+                    ),
+                    value: _popupBlock,
+                    activeColor: _C.accent,
+                    onChanged: (v) async {
+                      await _setPopup(v);
                       setModal(() {});
                     },
                   ),
@@ -607,15 +665,6 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                       await _setDesktop(v);
                       setModal(() {});
                       if (ctx.mounted) Navigator.pop(ctx);
-                    },
-                  ),
-                  SwitchListTile.adaptive(
-                    title: const Text('拦截弹窗', style: TextStyle(color: _C.text)),
-                    value: _popupBlock,
-                    activeColor: _C.accent,
-                    onChanged: (v) async {
-                      await _setPopup(v);
-                      setModal(() {});
                     },
                   ),
                   const Divider(height: 1, color: Colors.white12),

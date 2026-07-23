@@ -14,5 +14,8 @@ class BrowserTabModel {
   bool canGoForward = false;
   int progress = 0;
 
+  /// Set true before address-bar / bookmark loadUrl so cross-site lock allows once.
+  bool allowCrossSiteOnce = false;
+
   bool get isBlank => url.isEmpty || url == 'about:blank';
 }

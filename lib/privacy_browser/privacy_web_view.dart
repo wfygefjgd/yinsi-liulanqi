@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'ad_block.dart';
 import 'browser_tab_model.dart';
 import 'reader_scripts.dart';
 import 'session_identity.dart';
@@ -14,6 +15,8 @@ class PrivacyWebView extends StatefulWidget {
     required this.onChanged,
     required this.onControllerReady,
     this.popupBlock = true,
+    this.adBlock = true,
+    this.crossSiteBlock = true,
     this.desktopMode = false,
   });
 
@@ -21,6 +24,8 @@ class PrivacyWebView extends StatefulWidget {
   final TabChanged onChanged;
   final void Function(InAppWebViewController controller) onControllerReady;
   final bool popupBlock;
+  final bool adBlock;
+  final bool crossSiteBlock;
   final bool desktopMode;
 
   @override
@@ -30,6 +35,7 @@ class PrivacyWebView extends StatefulWidget {
 class _PrivacyWebViewState extends State<PrivacyWebView>
     with AutomaticKeepAliveClientMixin {
   InAppWebViewController? _controller;
+  String? _siteRoot;
 
   InAppWebViewSettings get _settings {
     final id = SessionIdentity.current;
@@ -62,6 +68,8 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       saveFormData: false,
       javaScriptCanOpenWindowsAutomatically: false,
       supportMultipleWindows: false,
+      useShouldOverrideUrlLoading: true,
+      useShouldInterceptRequest: true,
     );
   }
 
@@ -73,6 +81,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.desktopMode != widget.desktopMode) {
       _applyDesktop();
+    } else if (oldWidget.adBlock != widget.adBlock ||
+        oldWidget.crossSiteBlock != widget.crossSiteBlock ||
+        oldWidget.popupBlock != widget.popupBlock) {
+      _controller?.setSettings(settings: _settings);
     }
   }
 
@@ -85,15 +97,37 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     } catch (_) {}
   }
 
+  void _lockSiteFrom(String? url) {
+    if (url == null || url.isEmpty || url.startsWith('about:')) return;
+    try {
+      final h = Uri.parse(url).host;
+      if (h.isEmpty) return;
+      _siteRoot = AdBlock.rootish(h);
+    } catch (_) {}
+  }
+
+  bool _isCrossSite(String url) {
+    if (_siteRoot == null) return false;
+    try {
+      final h = Uri.parse(url).host;
+      if (h.isEmpty) return false;
+      return AdBlock.rootish(h) != _siteRoot;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _inject(InAppWebViewController controller) async {
     try {
       await controller.evaluateJavascript(
         source: SessionIdentity.current.injectScript,
       );
     } catch (_) {}
-    if (widget.popupBlock) {
+    if (widget.popupBlock || widget.adBlock) {
       try {
-        await controller.evaluateJavascript(source: ReaderScripts.popupBlock);
+        await controller.evaluateJavascript(
+          source: ReaderScripts.adAndPopupBlock,
+        );
       } catch (_) {}
     }
   }
@@ -122,6 +156,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         widget.tab.progress = 0;
         final s = url?.toString() ?? '';
         if (s.isNotEmpty && s != 'about:blank') {
+          if (_siteRoot == null || widget.tab.allowCrossSiteOnce) {
+            _lockSiteFrom(s);
+            widget.tab.allowCrossSiteOnce = false;
+          }
           widget.tab.url = s;
           widget.tab.addressText = s;
         }
@@ -134,10 +172,17 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       },
       onLoadStop: (controller, url) async {
         await _inject(controller);
+        // Re-inject after short delay (late ads)
+        Future<void>.delayed(const Duration(milliseconds: 600), () async {
+          try {
+            await _inject(controller);
+          } catch (_) {}
+        });
         widget.tab.isLoading = false;
         widget.tab.progress = 100;
         final s = url?.toString() ?? '';
         if (s.isNotEmpty) {
+          if (_siteRoot == null) _lockSiteFrom(s);
           widget.tab.url = s;
           if (s != 'about:blank') {
             widget.tab.addressText = s;
@@ -166,14 +211,68 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        final url = createWindowAction.request.url;
-        if (url != null) {
-          await controller.loadUrl(urlRequest: URLRequest(url: url));
-        }
+        // Hard block pop-up windows.
         return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
+        final url = navigationAction.request.url?.toString();
+        if (url == null || url.isEmpty) {
+          return NavigationActionPolicy.ALLOW;
+        }
+        if (url.startsWith('about:') ||
+            url.startsWith('data:') ||
+            url.startsWith('blob:') ||
+            url.startsWith('javascript:')) {
+          return NavigationActionPolicy.ALLOW;
+        }
+
+        // Block known ad / tracker navigations.
+        if (widget.adBlock && AdBlock.isAdUrl(url)) {
+          return NavigationActionPolicy.CANCEL;
+        }
+
+        final isMain = navigationAction.isForMainFrame ?? true;
+        if (!isMain) {
+          // Subframe: still block ad frames.
+          if (widget.adBlock && AdBlock.isAdUrl(url)) {
+            return NavigationActionPolicy.CANCEL;
+          }
+          return NavigationActionPolicy.ALLOW;
+        }
+
+        // Address bar / bookmark intentional navigation.
+        if (widget.tab.allowCrossSiteOnce) {
+          _siteRoot = null;
+          _lockSiteFrom(url);
+          widget.tab.allowCrossSiteOnce = false;
+          return NavigationActionPolicy.ALLOW;
+        }
+
+        // First page in blank tab.
+        if (_siteRoot == null || widget.tab.isBlank) {
+          _lockSiteFrom(url);
+          return NavigationActionPolicy.ALLOW;
+        }
+
+        // Cross-site jump from page content → block.
+        if (widget.crossSiteBlock && _isCrossSite(url)) {
+          return NavigationActionPolicy.CANCEL;
+        }
+
         return NavigationActionPolicy.ALLOW;
+      },
+      shouldInterceptRequest: (controller, request) async {
+        if (!widget.adBlock) return null;
+        final url = request.url.toString();
+        if (AdBlock.isAdUrl(url)) {
+          return WebResourceResponse(
+            contentType: 'text/plain',
+            data: <int>[],
+            statusCode: 204,
+            reasonPhrase: 'Blocked',
+          );
+        }
+        return null;
       },
     );
   }

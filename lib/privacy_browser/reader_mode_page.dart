@@ -3,11 +3,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'ad_block.dart';
 import 'durable_store.dart';
 import 'reader_scripts.dart';
 import 'session_identity.dart';
 
-/// Clean reader: extract body, optional auto-stitch next chapters.
+/// Real reader: load page in worker → extract main text → clean view + stitch.
 class ReaderModePage extends StatefulWidget {
   const ReaderModePage({
     super.key,
@@ -25,26 +26,20 @@ class ReaderModePage extends StatefulWidget {
 class _ReaderModePageState extends State<ReaderModePage> {
   final _parts = <_ChapterPart>[];
   InAppWebViewController? _worker;
+  InAppWebViewController? _viewer;
   bool _loading = true;
   bool _stitching = false;
   bool _stitchEnabled = true;
-  String _status = '提取正文…';
+  int _extractAttempts = 0;
+  String _status = '加载页面…';
   String? _error;
   String? _pendingNext;
-  final _scroll = ScrollController();
+  String? _loadingUrl;
 
   @override
   void initState() {
     super.initState();
     _bootstrap();
-    _scroll.addListener(_onScroll);
-  }
-
-  @override
-  void dispose() {
-    _scroll.removeListener(_onScroll);
-    _scroll.dispose();
-    super.dispose();
   }
 
   Future<void> _bootstrap() async {
@@ -52,90 +47,175 @@ class _ReaderModePageState extends State<ReaderModePage> {
     if (mounted) setState(() {});
   }
 
-  void _onScroll() {
-    if (!_stitchEnabled || _stitching || _pendingNext == null) return;
-    if (!_scroll.hasClients) return;
-    final pos = _scroll.position;
-    if (pos.pixels >= pos.maxScrollExtent - 240) {
-      _stitchNext();
-    }
-  }
-
   Future<void> _onWorkerCreated(InAppWebViewController c) async {
     _worker = c;
+    _loadingUrl = widget.initialUrl;
     await c.loadUrl(urlRequest: URLRequest(url: WebUri(widget.initialUrl)));
   }
 
-  Future<void> _extractFromWorker({bool append = false}) async {
+  Future<void> _onWorkerLoadStop(InAppWebViewController c, WebUri? url) async {
+    // Wait for DOM to settle.
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    try {
+      await c.evaluateJavascript(source: ReaderScripts.adAndPopupBlock);
+    } catch (_) {}
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await _extractFromWorker(append: _parts.isNotEmpty, attempt: 0);
+  }
+
+  Future<void> _extractFromWorker({
+    required bool append,
+    required int attempt,
+  }) async {
     final c = _worker;
     if (c == null) return;
-    try {
-      await c.evaluateJavascript(source: ReaderScripts.popupBlock);
-    } catch (_) {}
+
     dynamic raw;
     try {
       raw = await c.evaluateJavascript(source: ReaderScripts.extractArticle);
-    } catch (e) {
+    } catch (_) {
+      raw = null;
+    }
+
+    Map<String, dynamic>? data = _parseExtract(raw);
+
+    // Retry if thin content (SPA / slow render).
+    final textLen = (data?['textLen'] as num?)?.toInt() ?? 0;
+    final score = (data?['score'] as num?)?.toInt() ?? 0;
+    if ((data == null || textLen < 80 || score < 50) && attempt < 4) {
+      if (mounted) {
+        setState(() {
+          _status = '提取正文中…(${attempt + 1})';
+          _loading = true;
+        });
+      }
+      await Future<void>.delayed(Duration(milliseconds: 400 + attempt * 300));
+      try {
+        await c.evaluateJavascript(source: ReaderScripts.adAndPopupBlock);
+      } catch (_) {}
+      return _extractFromWorker(append: append, attempt: attempt + 1);
+    }
+
+    if (data == null) {
       if (mounted) {
         setState(() {
           _loading = false;
-          _error = '提取失败';
+          _stitching = false;
+          if (!append) _error = '无法提取正文，请返回网页或换源';
         });
       }
       return;
     }
-    if (raw == null) return;
-    final s = raw is String ? raw : raw.toString();
-    // flutter_inappwebview may return JSON string with quotes
-    String jsonStr = s;
-    if (jsonStr.startsWith('"') && jsonStr.endsWith('"')) {
+
+    final title = (data['title'] as String?)?.trim() ?? '';
+    var html = (data['html'] as String?) ?? '';
+    final next = (data['next'] as String?)?.trim() ?? '';
+    final pageUrl = (data['url'] as String?) ?? _loadingUrl ?? widget.initialUrl;
+
+    html = _sanitizeHtml(html);
+    if (html.trim().isEmpty || textLen < 40) {
+      // Last resort: body innerText as paragraphs
       try {
-        jsonStr = jsonDecode(jsonStr) as String;
+        final plain = await c.evaluateJavascript(
+          source:
+              r"(function(){return (document.body&&document.body.innerText)||'';})();",
+        );
+        final text = plain?.toString() ?? '';
+        if (text.trim().length > 40) {
+          html = text
+              .split(RegExp(r'\n+'))
+              .map((l) => l.trim())
+              .where((l) => l.isNotEmpty)
+              .map(_esc)
+              .map((l) => '<p>$l</p>')
+              .join();
+        }
       } catch (_) {}
     }
-    Map<String, dynamic> data;
-    try {
-      data = Map<String, dynamic>.from(jsonDecode(jsonStr) as Map);
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          if (!append) _error = '无法解析正文';
-        });
-      }
-      return;
-    }
-    final title = (data['title'] as String?)?.trim() ?? '';
-    final html = (data['html'] as String?) ?? '';
-    final next = (data['next'] as String?)?.trim();
-    final url = (data['url'] as String?) ?? widget.initialUrl;
+
     if (html.trim().isEmpty) {
       if (mounted) {
         setState(() {
           _loading = false;
-          if (!append) _error = '未找到正文，可返回原页';
+          _stitching = false;
+          if (!append) _error = '未找到正文';
         });
       }
       return;
     }
+
+    // Don't stitch to ad / cross-site junk.
+    String? nextOk = next.isNotEmpty ? next : null;
+    if (nextOk != null && AdBlock.isAdUrl(nextOk)) nextOk = null;
+    if (nextOk != null && !AdBlock.isSameSite(pageUrl, nextOk)) {
+      // allow same-novel CDN on subdomain — rootish same only
+      if (!AdBlock.isSameSite(pageUrl, nextOk)) nextOk = null;
+    }
+
     if (!mounted) return;
     setState(() {
       if (!append) {
         _parts
           ..clear()
-          ..add(_ChapterPart(title: title, html: html, url: url));
+          ..add(_ChapterPart(title: title, html: html, url: pageUrl));
       } else {
-        // avoid exact duplicate
-        if (_parts.isEmpty || _parts.last.html != html) {
-          _parts.add(_ChapterPart(title: title, html: html, url: url));
+        final dup = _parts.isNotEmpty &&
+            (_parts.last.html == html || _parts.last.url == pageUrl);
+        if (!dup) {
+          _parts.add(_ChapterPart(title: title, html: html, url: pageUrl));
         }
       }
-      _pendingNext = (next != null && next.isNotEmpty && next != url) ? next : null;
+      _pendingNext = nextOk;
       _loading = false;
       _stitching = false;
-      _status = _pendingNext == null ? '已到底' : '继续滚动加载下一章';
+      _extractAttempts = attempt;
+      _status = _pendingNext == null
+          ? '共 ${_parts.length} 段 · 已到底'
+          : '共 ${_parts.length} 段 · 滚动或点 → 加载下一章';
       _error = null;
     });
+
+    await _refreshViewer();
+  }
+
+  Map<String, dynamic>? _parseExtract(dynamic raw) {
+    if (raw == null) return null;
+    var s = raw is String ? raw : raw.toString();
+    if (s == 'null' || s.isEmpty) return null;
+    if (s.startsWith('"') && s.endsWith('"')) {
+      try {
+        s = jsonDecode(s) as String;
+      } catch (_) {}
+    }
+    try {
+      return Map<String, dynamic>.from(jsonDecode(s) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _sanitizeHtml(String html) {
+    // strip scripts/styles/iframes
+    html = html.replaceAll(
+      RegExp(r'<(script|style|iframe|object|embed)[^>]*>[\s\S]*?</\1>',
+          caseSensitive: false),
+      '',
+    );
+    html = html.replaceAll(
+      RegExp(r'<(script|style|iframe|object|embed)[^>]*/>',
+          caseSensitive: false),
+      '',
+    );
+    html = html.replaceAll(
+      RegExp(r'''\son\w+\s*=\s*['"][^'"]*['"]''', caseSensitive: false),
+      '',
+    );
+    html = html.replaceAll(
+      RegExp(r'''\s(href|src)\s*=\s*['"]javascript:[^'"]*['"]''',
+          caseSensitive: false),
+      '',
+    );
+    return html;
   }
 
   Future<void> _stitchNext() async {
@@ -146,17 +226,35 @@ class _ReaderModePageState extends State<ReaderModePage> {
     if (c == null) return;
     setState(() {
       _stitching = true;
+      _loading = true;
       _status = '拼接下一章…';
     });
+    _loadingUrl = next;
     try {
       await c.loadUrl(urlRequest: URLRequest(url: WebUri(next)));
     } catch (_) {
       if (mounted) {
         setState(() {
           _stitching = false;
+          _loading = false;
           _status = '下一章加载失败';
         });
       }
+    }
+  }
+
+  Future<void> _refreshViewer() async {
+    final v = _viewer;
+    if (v == null || _parts.isEmpty) return;
+    try {
+      await v.loadData(
+        data: _buildDocumentHtml(),
+        mimeType: 'text/html',
+        encoding: 'utf-8',
+        baseUrl: WebUri(_parts.last.url),
+      );
+    } catch (_) {
+      if (mounted) setState(() {}); // rebuild with new key
     }
   }
 
@@ -172,18 +270,25 @@ class _ReaderModePageState extends State<ReaderModePage> {
         body.writeln('<hr class="sep"/>');
       }
     }
+    body.writeln(
+      '<div id="end" style="height:120px;color:#666;text-align:center;padding:24px 0;font-size:13px;">'
+      '${_pendingNext != null && _stitchEnabled ? "继续下滚加载下一章" : "— 结束 —"}'
+      '</div>',
+    );
     return '''
 <!DOCTYPE html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
 <style>
   :root { color-scheme: dark; }
-  body { margin:0; padding:16px 18px 80px; background:#0B0B0D; color:#E8E8ED;
-    font-size:18px; line-height:1.75; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px 18px 40px; background:#0B0B0D; color:#E8E8ED;
+    font-size:18px; line-height:1.85; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    word-wrap: break-word; overflow-wrap: break-word; }
   h2.ch-title { font-size:20px; margin: 8px 0 16px; color:#fff; font-weight:600; }
-  .ch-body img { max-width:100%; height:auto; }
-  .ch-body a { color:#0A84FF; }
+  .ch-body img { max-width:100%; height:auto; border-radius:6px; }
+  .ch-body a { color:#0A84FF; pointer-events: none; text-decoration:none; }
+  .ch-body p { margin: 0 0 0.95em; text-indent: 0; }
   hr.sep { border:none; border-top:1px solid #2C2C2E; margin:28px 0; }
-  p { margin: 0 0 0.9em; }
 </style></head><body>${body.toString()}</body></html>
 ''';
   }
@@ -197,6 +302,8 @@ class _ReaderModePageState extends State<ReaderModePage> {
   @override
   Widget build(BuildContext context) {
     final ua = SessionIdentity.current.userAgent(desktop: false);
+    final showViewer = _parts.isNotEmpty && _error == null;
+
     return Scaffold(
       backgroundColor: const Color(0xFF0B0B0D),
       appBar: AppBar(
@@ -204,13 +311,15 @@ class _ReaderModePageState extends State<ReaderModePage> {
         title: Text(
           _parts.isNotEmpty && _parts.first.title.isNotEmpty
               ? _parts.first.title
-              : (widget.initialTitle.isNotEmpty ? widget.initialTitle : '阅读模式'),
+              : (widget.initialTitle.isNotEmpty
+                  ? widget.initialTitle
+                  : '阅读模式'),
           style: const TextStyle(fontSize: 16),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
-          if (_pendingNext != null && _stitchEnabled)
+          if (_stitchEnabled && _pendingNext != null)
             IconButton(
               tooltip: '下一章',
               onPressed: _stitching ? null : _stitchNext,
@@ -220,12 +329,12 @@ class _ReaderModePageState extends State<ReaderModePage> {
       ),
       body: Stack(
         children: [
-          // Hidden worker WebView for fetch/extract
-          SizedBox(
-            width: 1,
-            height: 1,
-            child: Opacity(
-              opacity: 0,
+          // Hidden worker: real page load + extract
+          Offstage(
+            offstage: true,
+            child: SizedBox(
+              width: 1,
+              height: 1,
               child: InAppWebView(
                 initialSettings: InAppWebViewSettings(
                   incognito: true,
@@ -234,12 +343,56 @@ class _ReaderModePageState extends State<ReaderModePage> {
                   cacheEnabled: false,
                   userAgent: ua,
                   transparentBackground: true,
+                  javaScriptCanOpenWindowsAutomatically: false,
+                  supportMultipleWindows: false,
+                  useShouldOverrideUrlLoading: true,
+                  useShouldInterceptRequest: true,
                 ),
                 onWebViewCreated: _onWorkerCreated,
-                onLoadStop: (controller, url) async {
-                  await Future<void>.delayed(const Duration(milliseconds: 350));
-                  await _extractFromWorker(append: _parts.isNotEmpty);
+                onLoadStart: (c, url) {
+                  if (mounted) {
+                    setState(() {
+                      _status = _parts.isEmpty ? '加载页面…' : '加载下一章…';
+                      _loading = true;
+                    });
+                  }
                 },
+                onLoadStop: _onWorkerLoadStop,
+                shouldOverrideUrlLoading: (c, action) async {
+                  final u = action.request.url?.toString() ?? '';
+                  if (AdBlock.isAdUrl(u)) {
+                    return NavigationActionPolicy.CANCEL;
+                  }
+                  // Keep worker on same site as initial novel.
+                  if ((action.isForMainFrame ?? true) &&
+                      !AdBlock.isSameSite(widget.initialUrl, u) &&
+                      u.isNotEmpty &&
+                      !u.startsWith('about:')) {
+                    // allow next chapter only if we requested it
+                    if (_loadingUrl != null &&
+                        AdBlock.isSameSite(_loadingUrl, u)) {
+                      return NavigationActionPolicy.ALLOW;
+                    }
+                    if (AdBlock.isSameSite(widget.initialUrl, u)) {
+                      return NavigationActionPolicy.ALLOW;
+                    }
+                    return NavigationActionPolicy.CANCEL;
+                  }
+                  return NavigationActionPolicy.ALLOW;
+                },
+                shouldInterceptRequest: (c, req) async {
+                  final u = req.url.toString();
+                  if (AdBlock.isAdUrl(u)) {
+                    return WebResourceResponse(
+                      contentType: 'text/plain',
+                      data: <int>[],
+                      statusCode: 204,
+                      reasonPhrase: 'Blocked',
+                    );
+                  }
+                  return null;
+                },
+                onCreateWindow: (c, a) async => false,
               ),
             ),
           ),
@@ -250,8 +403,21 @@ class _ReaderModePageState extends State<ReaderModePage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(_error!, style: const TextStyle(color: Colors.white70)),
-                    const SizedBox(height: 12),
+                    Text(_error!,
+                        style: const TextStyle(color: Colors.white70),
+                        textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _error = null;
+                          _loading = true;
+                          _status = '重试提取…';
+                        });
+                        _worker?.reload();
+                      },
+                      child: const Text('重试'),
+                    ),
                     TextButton(
                       onPressed: () => Navigator.pop(context),
                       child: const Text('返回网页'),
@@ -260,9 +426,10 @@ class _ReaderModePageState extends State<ReaderModePage> {
                 ),
               ),
             )
-          else if (_parts.isNotEmpty)
+          else if (showViewer)
             InAppWebView(
-              key: ValueKey(_parts.length),
+              key: ValueKey(
+                  'viewer_${_parts.length}_${_parts.last.url.hashCode}'),
               initialData: InAppWebViewInitialData(
                 data: _buildDocumentHtml(),
                 mimeType: 'text/html',
@@ -273,21 +440,26 @@ class _ReaderModePageState extends State<ReaderModePage> {
                 javaScriptEnabled: false,
                 supportZoom: true,
                 transparentBackground: true,
+                disableHorizontalScroll: false,
+                disableVerticalScroll: false,
               ),
+              onWebViewCreated: (c) => _viewer = c,
               onScrollChanged: (controller, x, y) async {
-                // fallback stitch trigger via content height approx
-                if (!_stitchEnabled || _stitching || _pendingNext == null) return;
+                if (!_stitchEnabled || _stitching || _pendingNext == null) {
+                  return;
+                }
                 try {
                   final h = await controller.getContentHeight() ?? 0;
-                  final sy = y;
-                  if (h > 0 && sy > h - 900) {
-                    _stitchNext();
+                  if (h > 0 && y > h - 1000) {
+                    await _stitchNext();
                   }
                 } catch (_) {}
               },
             )
           else
-            const Center(child: CircularProgressIndicator(color: Color(0xFF0A84FF))),
+            const Center(
+              child: CircularProgressIndicator(color: Color(0xFF0A84FF)),
+            ),
           if (_loading || _stitching)
             Positioned(
               left: 0,
@@ -298,21 +470,31 @@ class _ReaderModePageState extends State<ReaderModePage> {
                 child: SafeArea(
                   top: false,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
                     child: Row(
                       children: [
                         const SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF0A84FF)),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFF0A84FF),
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _status,
-                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 13),
                           ),
                         ),
+                        if (!_stitchEnabled)
+                          const Text(
+                            '拼接已关',
+                            style: TextStyle(color: Colors.white38, fontSize: 12),
+                          ),
                       ],
                     ),
                   ),
