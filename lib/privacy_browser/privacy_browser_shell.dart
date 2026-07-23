@@ -20,6 +20,20 @@ class _S {
   static const danger = Color(0xFFFF453A);
 }
 
+/// Hardcoded favorites (not wiped with site data).
+class _Bookmark {
+  const _Bookmark({required this.title, required this.url});
+  final String title;
+  final String url;
+}
+
+const List<_Bookmark> kBuiltInBookmarks = [
+  _Bookmark(
+    title: 'Jiurelay',
+    url: 'https://jiurelay.com/r/JR-UQYJQT',
+  ),
+];
+
 class PrivacyBrowserApp extends StatelessWidget {
   const PrivacyBrowserApp({super.key});
 
@@ -148,6 +162,72 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     setState(() {});
   }
 
+  Future<void> _openBookmark(_Bookmark b) async {
+    _addressCtrl.text = b.url;
+    await _go(b.url);
+  }
+
+  Future<void> _showBookmarks() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(top: 10, bottom: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '书签',
+                    style: TextStyle(
+                      color: _S.text,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              for (final b in kBuiltInBookmarks)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: _S.field,
+                    child: const Icon(Icons.public, color: _S.accent, size: 20),
+                  ),
+                  title: Text(b.title, style: const TextStyle(color: _S.text)),
+                  subtitle: Text(
+                    b.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: _S.secondary, fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openBookmark(b);
+                  },
+                ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _confirmReset() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -156,7 +236,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: const Text('清除浏览数据', style: TextStyle(color: _S.text)),
         content: const Text(
-          '清除全部网站数据、缓存与 Cookie，并冷启动。书签等本地设置会一并清除。',
+          '清除全部网站数据、缓存与 Cookie，并冷启动。内置书签不会删除。',
           style: TextStyle(color: _S.secondary),
         ),
         actions: [
@@ -259,7 +339,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                           ),
                       ],
                     ),
-                    if (showHome) const _SafariStartPage(),
+                    if (showHome)
+                      _SafariStartPage(onOpenBookmark: _openBookmark),
                     if (_showTabs)
                       _TabsOverlay(
                         manager: tm,
@@ -329,6 +410,10 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             icon: Icons.chevron_right_rounded,
                             enabled: tab.canGoForward,
                             onTap: () => _activeController?.goForward(),
+                          ),
+                          _BarIcon(
+                            icon: Icons.bookmark_border_rounded,
+                            onTap: _showBookmarks,
                           ),
                           _BarIcon(
                             icon: Icons.ios_share_rounded,
@@ -541,7 +626,9 @@ class _BarIcon extends StatelessWidget {
 }
 
 class _SafariStartPage extends StatelessWidget {
-  const _SafariStartPage();
+  const _SafariStartPage({required this.onOpenBookmark});
+
+  final void Function(_Bookmark) onOpenBookmark;
 
   @override
   Widget build(BuildContext context) {
@@ -549,48 +636,116 @@ class _SafariStartPage extends StatelessWidget {
       color: _S.bg,
       child: SafeArea(
         bottom: false,
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: _S.accent, width: 5),
-                  ),
-                  child: const Icon(
-                    Icons.travel_explore_rounded,
-                    color: _S.accent,
-                    size: 34,
-                  ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 16),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _S.accent, width: 5),
                 ),
-                const SizedBox(height: 20),
-                const Text(
-                  '隐私浏览器',
-                  style: TextStyle(
-                    color: _S.text,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.5,
-                  ),
+                child: const Icon(
+                  Icons.travel_explore_rounded,
+                  color: _S.accent,
+                  size: 30,
                 ),
-                const SizedBox(height: 8),
-                const Text(
-                  '在底部地址栏搜索或输入网址\n点击链接将在后台标签打开',
-                  textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '隐私浏览器',
+                style: TextStyle(
+                  color: _S.text,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                '底部搜索 · 点链接后台开标签',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _S.secondary, fontSize: 13),
+              ),
+              const SizedBox(height: 28),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '个人收藏',
                   style: TextStyle(
                     color: _S.secondary,
-                    fontSize: 14,
-                    height: 1.45,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 20,
+                  runSpacing: 16,
+                  children: [
+                    for (final b in kBuiltInBookmarks)
+                      _FavoriteTile(
+                        title: b.title,
+                        onTap: () => onOpenBookmark(b),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FavoriteTile extends StatelessWidget {
+  const _FavoriteTile({required this.title, required this.onTap});
+
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 72,
+        child: Column(
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: _S.field,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Center(
+                child: Text(
+                  title.isNotEmpty ? title.substring(0, 1).toUpperCase() : '?',
+                  style: const TextStyle(
+                    color: _S.accent,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _S.text, fontSize: 11),
+            ),
+          ],
         ),
       ),
     );

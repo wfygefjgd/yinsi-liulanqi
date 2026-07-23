@@ -15,5 +15,6 @@ void main() {
     await tester.pump();
     expect(find.text('搜索或输入网站名称'), findsOneWidget);
     expect(find.text('隐私浏览器'), findsOneWidget);
+    expect(find.text('Jiurelay'), findsOneWidget);
   });
 }
