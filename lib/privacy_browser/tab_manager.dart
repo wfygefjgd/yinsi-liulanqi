@@ -38,35 +38,43 @@ class TabManager extends ChangeNotifier {
       t.title = '加载中…';
     }
     _tabs.add(t);
-    // Stay on current tab for background open; only switch if blank new tab from UI
-    if (url == null) {
-      _activeIndex = _tabs.length - 1;
-    }
+    // New tab becomes active (old page stays as another tab in the strip).
+    _activeIndex = _tabs.length - 1;
     notifyListeners();
     return true;
   }
 
-  /// Open URL in a new background tab; keep current tab focused.
-  bool openInBackground(String url) {
+  /// Open URL in a new tab and switch to it (old page remains open in background).
+  bool openInNewTabForeground(String url) {
     if (url.isEmpty) return false;
     if (!canAdd) {
-      // Replace last non-active tab if full
+      // Reuse a non-active tab, then switch to it
       for (var i = _tabs.length - 1; i >= 0; i--) {
         if (i != _activeIndex) {
           final t = _tabs[i];
           t.pendingUrl = url;
           t.url = url;
           t.addressText = url;
-          t.title = '后台加载…';
-          t.viewKey; // keep
+          t.title = '加载中…';
+          _activeIndex = i;
           notifyListeners();
           return true;
         }
       }
-      return false;
+      // Only one tab: navigate current (no spare tab)
+      final t = active;
+      t.pendingUrl = url;
+      t.url = url;
+      t.addressText = url;
+      t.title = '加载中…';
+      notifyListeners();
+      return true;
     }
     return addTab(url: url);
   }
+
+  /// @deprecated use [openInNewTabForeground]
+  bool openInBackground(String url) => openInNewTabForeground(url);
 
   void closeTab(int index) {
     if (index < 0 || index >= _tabs.length) return;

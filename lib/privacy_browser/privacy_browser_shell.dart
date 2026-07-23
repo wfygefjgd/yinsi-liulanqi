@@ -146,14 +146,16 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     if (mounted) setState(() => _showTabs = false);
   }
 
-  void _openInBackground(String url) {
+  void _openInNewTab(String url) {
     final tm = context.read<TabManager>();
-    final ok = tm.openInBackground(url);
+    final ok = tm.openInNewTabForeground(url);
     if (!mounted) return;
+    // Switch address bar to the new active tab
+    _addressCtrl.text = tm.active.addressText;
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok ? '已在后台标签打开' : '标签已满，无法后台打开'),
+        content: Text(ok ? '已在新标签打开（上一页仍在标签里）' : '无法打开'),
         duration: const Duration(seconds: 1),
         behavior: SnackBarBehavior.floating,
         backgroundColor: _S.field,
@@ -329,7 +331,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                           PrivacyWebView(
                             key: ValueKey(t.id),
                             tab: t,
-                            onOpenInBackground: _openInBackground,
+                            onOpenInBackground: _openInNewTab,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
@@ -666,7 +668,7 @@ class _SafariStartPage extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               const Text(
-                '底部搜索 · 点链接后台开标签',
+                '底部搜索 · 点链接新标签打开',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _S.secondary, fontSize: 13),
               ),
