@@ -11,6 +11,7 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val channelName = "privacy_browser/engine"
+    private val durableName = "durable"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -23,7 +24,6 @@ class MainActivity : FlutterActivity() {
                     }
                     "exitApp" -> {
                         result.success(null)
-                        // Soft exit after Flutter fade (no crash-like flash).
                         window.decorView.postDelayed({
                             finishAndRemoveTask()
                             Process.killProcess(Process.myPid())
@@ -54,16 +54,18 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        deleteRecursively(cacheDir)
-        deleteRecursively(codeCacheDir)
-        deleteRecursively(externalCacheDir)
-        deleteRecursively(filesDir)
-        deleteRecursively(getDir("webview", MODE_PRIVATE))
-        deleteRecursively(getDir("app_webview", MODE_PRIVATE))
-        deleteRecursively(File(applicationInfo.dataDir, "app_webview"))
-        deleteRecursively(File(applicationInfo.dataDir, "cache"))
-        deleteRecursively(File(applicationInfo.dataDir, "code_cache"))
+        deleteRecursivelyPreserve(cacheDir, null)
+        deleteRecursivelyPreserve(codeCacheDir, null)
+        deleteRecursivelyPreserve(externalCacheDir, null)
+        // Keep app_flutter/durable or filesDir/durable bookmarks.
+        deleteRecursivelyPreserve(filesDir, durableName)
+        deleteRecursivelyPreserve(getDir("webview", MODE_PRIVATE), null)
+        deleteRecursivelyPreserve(getDir("app_webview", MODE_PRIVATE), null)
+        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "app_webview"), null)
+        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "cache"), null)
+        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "code_cache"), null)
 
+        // Clear flutter prefs except we store bookmarks in files, not prefs.
         getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
             .edit()
             .clear()
@@ -73,11 +75,35 @@ class MainActivity : FlutterActivity() {
         databaseList()?.forEach { deleteDatabase(it) }
     }
 
-    private fun deleteRecursively(file: File?) {
+    private fun deleteRecursivelyPreserve(file: File?, preserveChildName: String?) {
         if (file == null || !file.exists()) return
         if (file.isDirectory) {
-            file.listFiles()?.forEach { deleteRecursively(it) }
+            file.listFiles()?.forEach { child ->
+                if (preserveChildName != null && child.name == preserveChildName) {
+                    return@forEach
+                }
+                // Also preserve nested path .../app_flutter/durable or documents/durable
+                if (preserveChildName != null && child.isDirectory) {
+                    val durable = File(child, preserveChildName)
+                    if (durable.exists()) {
+                        child.listFiles()?.forEach { grand ->
+                            if (grand.name != preserveChildName) {
+                                deleteRecursivelyPreserve(grand, null)
+                            }
+                        }
+                        return@forEach
+                    }
+                }
+                deleteRecursivelyPreserve(child, null)
+            }
+            // do not delete root filesDir if we preserved children
+            if (preserveChildName == null) {
+                file.delete()
+            } else {
+                // leave directory
+            }
+        } else {
+            file.delete()
         }
-        file.delete()
     }
 }

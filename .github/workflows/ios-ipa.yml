@@ -145,31 +145,31 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: 隐私浏览器 iOS v1.0.1
+          tag_name: v1.1.0
+          name: 隐私浏览器 iOS v1.1.0
           body: |
-            ## 隐私浏览器 iOS v1.0.1
+            ## 隐私浏览器 iOS v1.1.0
 
-            未签名 IPA，需自签名安装：全能签 / Sideloadly / AltStore / TrollStore
+            未签名 IPA · 全能签 / Sideloadly / AltStore / TrollStore
 
             ### 版本
-            - **Version**: 1.0.1
-            - **Build**: 11
+            - **Version**: 1.1.0 · **Build**: 12
             - **Bundle ID**: `com.yinsi.liulanqi`
-            - **显示名**: 隐私浏览器
 
-            ### 本版更新
-            - **圆环 App 图标**（圆形描边，去掉方盾）
-            - **优雅退出**：切后台 / 换新身份先淡出到黑屏，再清数据退出（不再像崩溃一闪）
-            - 仍保留：每次冷启动新身份、Safari 底栏 UI、Jiurelay 书签
+            ### 本版功能
+            - 每次冷启动 / 退后台：**清网页痕迹**，**书签保留**
+            - **手动书签**（添加 / 删除 / 管理）
+            - **阅读模式**：正文抽取 + 挡弹窗；**拼接开关**可关
+            - 普通页轻量拦截弹窗 / `window.open`
+            - Safari 底栏 UI · 圆环图标 · 优雅退出
+            - 不做下载 / 历史
+
+            ### 底栏
+            后退 · 前进 · **阅读** · **加书签** · 书签 · 标签 · 换新身份
 
             ### 下载
             - `Yinsi-Liulanqi-iOS.ipa`
             - `SHA256.txt`
-
-            ### 安装
-            1. 下载 IPA → 重签安装
-            2. 建议先卸载旧版再装（刷新图标）
           files: |
             build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
             build/ipa_dist/SHA256.txt

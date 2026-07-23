@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'browser_tab_model.dart';
+import 'reader_scripts.dart';
 import 'session_identity.dart';
 
 typedef TabChanged = void Function();
@@ -12,11 +13,13 @@ class PrivacyWebView extends StatefulWidget {
     required this.tab,
     required this.onChanged,
     required this.onControllerReady,
+    this.popupBlock = true,
   });
 
   final BrowserTabModel tab;
   final TabChanged onChanged;
   final void Function(InAppWebViewController controller) onControllerReady;
+  final bool popupBlock;
 
   @override
   State<PrivacyWebView> createState() => _PrivacyWebViewState();
@@ -51,20 +54,27 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       sharedCookiesEnabled: false,
       limitsNavigationsToAppBoundDomains: false,
       userAgent: id.userAgent,
-      // Reduce storage surface.
       saveFormData: false,
+      // Block most window.open popups at engine level.
+      javaScriptCanOpenWindowsAutomatically: false,
+      supportMultipleWindows: false,
     );
   }
 
   @override
   bool get wantKeepAlive => true;
 
-  Future<void> _injectPrivacy(InAppWebViewController controller) async {
+  Future<void> _inject(InAppWebViewController controller) async {
     try {
       await controller.evaluateJavascript(
         source: SessionIdentity.current.injectScript,
       );
     } catch (_) {}
+    if (widget.popupBlock) {
+      try {
+        await controller.evaluateJavascript(source: ReaderScripts.popupBlock);
+      } catch (_) {}
+    }
   }
 
   Future<void> _syncNav() async {
@@ -102,7 +112,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         widget.onChanged();
       },
       onLoadStop: (controller, url) async {
-        await _injectPrivacy(controller);
+        await _inject(controller);
         widget.tab.isLoading = false;
         widget.tab.progress = 100;
         final s = url?.toString() ?? '';
@@ -133,6 +143,14 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           widget.tab.addressText = s;
         }
         await _syncNav();
+      },
+      onCreateWindow: (controller, createWindowAction) async {
+        // Never open popup windows — load in same tab if URL known.
+        final url = createWindowAction.request.url;
+        if (url != null) {
+          await controller.loadUrl(urlRequest: URLRequest(url: url));
+        }
+        return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
         return NavigationActionPolicy.ALLOW;

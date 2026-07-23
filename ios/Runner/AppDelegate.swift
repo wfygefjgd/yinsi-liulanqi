@@ -29,7 +29,6 @@ import WebKit
           result(nil)
         }
       case "exitApp":
-        // Flutter already faded to black; wait then exit quietly.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
           exit(0)
         }
@@ -42,6 +41,9 @@ import WebKit
 }
 
 enum PrivacyNativeWipe {
+  /// Keep Application Documents/durable (bookmarks + settings).
+  private static let durableFolderName = "durable"
+
   static func run(completion: @escaping () -> Void) {
     let group = DispatchGroup()
 
@@ -82,11 +84,15 @@ enum PrivacyNativeWipe {
       home.appendingPathComponent("Documents"),
     ]
     for url in targets {
-      wipeDirectoryContents(url, fileManager: fm)
+      wipeDirectoryContents(url, fileManager: fm, preserveName: durableFolderName)
     }
   }
 
-  private static func wipeDirectoryContents(_ url: URL, fileManager fm: FileManager) {
+  private static func wipeDirectoryContents(
+    _ url: URL,
+    fileManager fm: FileManager,
+    preserveName: String?
+  ) {
     guard fm.fileExists(atPath: url.path) else { return }
     guard let items = try? fm.contentsOfDirectory(
       at: url,
@@ -96,6 +102,9 @@ enum PrivacyNativeWipe {
       return
     }
     for item in items {
+      if let preserveName, item.lastPathComponent == preserveName {
+        continue
+      }
       try? fm.removeItem(at: item)
     }
   }

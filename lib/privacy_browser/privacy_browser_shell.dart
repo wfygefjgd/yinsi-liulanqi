@@ -7,10 +7,10 @@ import 'bookmarks.dart';
 import 'browser_tab_model.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
+import 'reader_mode_page.dart';
 import 'session_identity.dart';
 import 'tab_manager.dart';
 
-/// Safari-like dark palette.
 class _C {
   static const bg = Color(0xFF000000);
   static const bar = Color(0xF01C1C1E);
@@ -89,19 +89,17 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // inactive: user swiping away / app switcher — start graceful fade early.
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       if (_backgroundWiped || _resetting || _exiting) return;
       _backgroundWiped = true;
-      _gracefulExit(message: '正在安全退出…');
+      _gracefulExit();
     }
   }
 
-  /// Fade to black, blank webviews, wipe, then cold exit — no crash flash.
-  Future<void> _gracefulExit({required String message}) async {
+  Future<void> _gracefulExit() async {
     if (_exiting) return;
     _exiting = true;
     if (mounted) {
@@ -114,7 +112,6 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       await _exitFade.forward();
     } catch (_) {}
 
-    // Stop pages before wipe so content doesn't flash.
     for (final c in _controllers.values) {
       try {
         await c.stopLoading();
@@ -131,8 +128,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       _addressCtrl.clear();
     }
 
-    // Hold on solid black a beat so system transition feels intentional.
     await Future<void>.delayed(const Duration(milliseconds: 280));
+    // Bookmarks under Documents/durable are preserved by PrivacyEngine.
     await PrivacyEngine.resetAndRelaunch();
   }
 
@@ -164,6 +161,45 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     await _go(b.url);
   }
 
+  Future<void> _addCurrentBookmark() async {
+    final tab = context.read<TabManager>().active;
+    final url = tab.isBlank
+        ? _addressCtrl.text.trim()
+        : (tab.url.isNotEmpty ? tab.url : tab.addressText.trim());
+    if (url.isEmpty || url == 'about:blank') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前没有可收藏的网址')),
+      );
+      return;
+    }
+    final title = tab.title.isNotEmpty && tab.title != '新标签' ? tab.title : '';
+    await context.read<BookmarkStore>().add(Bookmark(title: title, url: url));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已加入书签（退出后仍保留）')),
+    );
+  }
+
+  void _openReader() {
+    final tab = context.read<TabManager>().active;
+    final url = tab.isBlank ? '' : tab.url;
+    if (url.isEmpty || url == 'about:blank') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先打开一个网页再进入阅读模式')),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ReaderModePage(
+          initialUrl: url,
+          initialTitle: tab.title,
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmReset() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -171,7 +207,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
         backgroundColor: const Color(0xFF2C2C2E),
         title: const Text('换新身份', style: TextStyle(color: _C.text)),
         content: const Text(
-          '清除全部网站数据并强制冷启动。下次打开 = 全新第一次无痕。',
+          '清除全部网站数据并冷启动。书签会保留。',
           style: TextStyle(color: _C.secondary),
         ),
         actions: [
@@ -188,12 +224,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       ),
     );
     if (ok != true || !mounted) return;
-    await _runHardReset();
-  }
-
-  Future<void> _runHardReset() async {
     if (_resetting || _exiting) return;
-    await _gracefulExit(message: '正在换新身份…');
+    await _gracefulExit();
   }
 
   void _syncAddressFromTab() {
@@ -222,6 +254,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   @override
   Widget build(BuildContext context) {
     final tm = context.watch<TabManager>();
+    final bookmarks = context.watch<BookmarkStore>();
     final tab = tm.active;
     _syncAddressFromTab();
     final showHome = tab.isBlank && !tab.isLoading;
@@ -233,7 +266,6 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
         children: [
           Column(
             children: [
-              // Top thin progress only (Safari style).
               if (tab.isLoading)
                 SafeArea(
                   bottom: false,
@@ -269,9 +301,10 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                     ),
                     if (showHome)
                       _SafariStartPage(
+                        bookmarks: bookmarks.items,
                         onOpenBookmark: _openBookmark,
-                        onSubmit: _go,
                         sessionHint: SessionIdentity.current.sessionId,
+                        onManageBookmarks: _showBookmarksSheet,
                       ),
                     if (_showTabs)
                       _TabsOverlay(
@@ -302,14 +335,17 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                   ],
                 ),
               ),
-              // Safari bottom chrome: address capsule + tool row.
               Material(
                 color: _C.bar,
                 elevation: 0,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Divider(height: 0.5, thickness: 0.5, color: Color(0x33FFFFFF)),
+                    const Divider(
+                      height: 0.5,
+                      thickness: 0.5,
+                      color: Color(0x33FFFFFF),
+                    ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
                       child: _AddressCapsule(
@@ -324,7 +360,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                       ),
                     ),
                     Padding(
-                      padding: EdgeInsets.fromLTRB(4, 0, 4, 4 + bottomPad),
+                      padding: EdgeInsets.fromLTRB(2, 0, 2, 4 + bottomPad),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
@@ -339,16 +375,16 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             onTap: () => _activeController?.goForward(),
                           ),
                           _BarIcon(
-                            icon: Icons.ios_share_rounded,
-                            onTap: () => _showBookmarksSheet(),
+                            icon: Icons.menu_book_rounded,
+                            onTap: _openReader,
                           ),
                           _BarIcon(
-                            icon: Icons.bookmark_border_rounded,
-                            onTap: () {
-                              if (kBookmarks.isNotEmpty) {
-                                _openBookmark(kBookmarks.first);
-                              }
-                            },
+                            icon: Icons.bookmark_add_outlined,
+                            onTap: _addCurrentBookmark,
+                          ),
+                          _BarIcon(
+                            icon: Icons.bookmarks_outlined,
+                            onTap: _showBookmarksSheet,
                           ),
                           _BarIcon(
                             icon: Icons.copy_all_outlined,
@@ -368,7 +404,6 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
               ),
             ],
           ),
-          // Graceful exit overlay: slow fade to black (not a crash flash).
           FadeTransition(
             opacity: _exitOpacity,
             child: IgnorePointer(
@@ -411,76 +446,198 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   }
 
   Future<void> _showBookmarksSheet() async {
+    final store = context.read<BookmarkStore>();
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF1C1C1E),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
       ),
       builder: (ctx) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(top: 10, bottom: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 8, 20, 12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '书签',
-                    style: TextStyle(
-                      color: _C.text,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-              for (final b in kBookmarks)
-                ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: _C.field,
-                    child: const Icon(Icons.public, color: _C.accent, size: 20),
-                  ),
-                  title: Text(b.title, style: const TextStyle(color: _C.text)),
-                  subtitle: Text(
-                    b.url,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _C.secondary, fontSize: 12),
-                  ),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _openBookmark(b);
-                  },
-                ),
-              ListTile(
-                leading: const Icon(Icons.shield_outlined, color: _C.danger),
-                title: const Text('换新身份', style: TextStyle(color: _C.danger)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _confirmReset();
+          child: StatefulBuilder(
+            builder: (ctx, setModal) {
+              final items = store.items;
+              return DraggableScrollableSheet(
+                expand: false,
+                initialChildSize: 0.55,
+                minChildSize: 0.35,
+                maxChildSize: 0.9,
+                builder: (_, scrollCtrl) {
+                  return Column(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(top: 10, bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+                        child: Row(
+                          children: [
+                            const Text(
+                              '书签',
+                              style: TextStyle(
+                                color: _C.text,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const Spacer(),
+                            TextButton.icon(
+                              onPressed: () async {
+                                await _promptAddBookmark(ctx, store);
+                                setModal(() {});
+                              },
+                              icon: const Icon(Icons.add, size: 18),
+                              label: const Text('添加'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '退出清痕迹，书签会保留',
+                            style: TextStyle(color: _C.secondary, fontSize: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: items.isEmpty
+                            ? const Center(
+                                child: Text(
+                                  '暂无书签',
+                                  style: TextStyle(color: _C.secondary),
+                                ),
+                              )
+                            : ListView.builder(
+                                controller: scrollCtrl,
+                                itemCount: items.length,
+                                itemBuilder: (_, i) {
+                                  final b = items[i];
+                                  return ListTile(
+                                    leading: CircleAvatar(
+                                      backgroundColor: _C.field,
+                                      child: const Icon(
+                                        Icons.public,
+                                        color: _C.accent,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      b.title,
+                                      style: const TextStyle(color: _C.text),
+                                    ),
+                                    subtitle: Text(
+                                      b.url,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: _C.secondary,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    trailing: IconButton(
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        color: _C.secondary,
+                                      ),
+                                      onPressed: () async {
+                                        await store.removeAt(i);
+                                        setModal(() {});
+                                      },
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      _openBookmark(b);
+                                    },
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  );
                 },
-              ),
-              const SizedBox(height: 12),
-            ],
+              );
+            },
           ),
         );
       },
     );
   }
+
+  Future<void> _promptAddBookmark(BuildContext ctx, BookmarkStore store) async {
+    final titleCtrl = TextEditingController();
+    final urlCtrl = TextEditingController();
+    final tab = context.read<TabManager>().active;
+    if (!tab.isBlank) {
+      urlCtrl.text = tab.url;
+      titleCtrl.text = tab.title == '新标签' ? '' : tab.title;
+    }
+    final ok = await showDialog<bool>(
+      context: ctx,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF2C2C2E),
+        title: const Text('添加书签', style: TextStyle(color: _C.text)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              style: const TextStyle(color: _C.text),
+              decoration: const InputDecoration(
+                labelText: '名称（可选）',
+                labelStyle: TextStyle(color: _C.secondary),
+              ),
+            ),
+            TextField(
+              controller: urlCtrl,
+              style: const TextStyle(color: _C.text),
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: '网址',
+                labelStyle: TextStyle(color: _C.secondary),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      var url = urlCtrl.text.trim();
+      if (url.isNotEmpty &&
+          !url.startsWith('http://') &&
+          !url.startsWith('https://')) {
+        url = 'https://$url';
+      }
+      if (url.isNotEmpty) {
+        await store.add(Bookmark(title: titleCtrl.text.trim(), url: url));
+      }
+    }
+    titleCtrl.dispose();
+    urlCtrl.dispose();
+  }
 }
 
-/// Safari-style rounded address field (bottom), text vertically centered.
 class _AddressCapsule extends StatelessWidget {
   const _AddressCapsule({
     required this.controller,
@@ -608,20 +765,21 @@ class _BarIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = enabled ? (color ?? _C.accent) : _C.secondary.withOpacity(0.35);
+    final c =
+        enabled ? (color ?? _C.accent) : _C.secondary.withOpacity(0.35);
     return InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(10),
       child: SizedBox(
-        width: 48,
+        width: 44,
         height: 40,
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Icon(icon, size: 26, color: c),
+            Icon(icon, size: 24, color: c),
             if (badge != null)
               Positioned(
-                right: 8,
+                right: 6,
                 bottom: 6,
                 child: Text(
                   badge!,
@@ -639,17 +797,18 @@ class _BarIcon extends StatelessWidget {
   }
 }
 
-/// Centered Safari start page (favorites + hint). Address is in bottom bar.
 class _SafariStartPage extends StatelessWidget {
   const _SafariStartPage({
+    required this.bookmarks,
     required this.onOpenBookmark,
-    required this.onSubmit,
     required this.sessionHint,
+    required this.onManageBookmarks,
   });
 
+  final List<Bookmark> bookmarks;
   final void Function(Bookmark) onOpenBookmark;
-  final void Function(String) onSubmit;
   final String sessionHint;
+  final VoidCallback onManageBookmarks;
 
   @override
   Widget build(BuildContext context) {
@@ -671,10 +830,7 @@ class _SafariStartPage extends StatelessWidget {
                       height: 78,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _C.accent,
-                          width: 6,
-                        ),
+                        border: Border.all(color: _C.accent, width: 6),
                         boxShadow: [
                           BoxShadow(
                             color: _C.accent.withOpacity(0.35),
@@ -710,35 +866,49 @@ class _SafariStartPage extends StatelessWidget {
                       style: const TextStyle(color: _C.secondary, fontSize: 13),
                     ),
                     const Spacer(flex: 1),
-                    const Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '个人收藏',
-                        style: TextStyle(
-                          color: _C.secondary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                    Row(
+                      children: [
+                        const Text(
+                          '个人收藏',
+                          style: TextStyle(
+                            color: _C.secondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: onManageBookmarks,
+                          child: const Text(
+                            '管理',
+                            style: TextStyle(fontSize: 13),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Wrap(
                         spacing: 20,
                         runSpacing: 16,
                         children: [
-                          for (final b in kBookmarks)
+                          for (final b in bookmarks)
                             _FavoriteTile(
                               title: b.title,
                               onTap: () => onOpenBookmark(b),
+                            ),
+                          if (bookmarks.isEmpty)
+                            const Text(
+                              '点底栏书签按钮添加',
+                              style: TextStyle(color: Color(0xFF48484A)),
                             ),
                         ],
                       ),
                     ),
                     const Spacer(flex: 2),
                     const Text(
-                      '在底部地址栏搜索，或点收藏打开',
+                      '底栏：阅读模式 · 加书签 · 书签 · 标签 · 换新身份',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Color(0xFF48484A), fontSize: 12),
                     ),
@@ -845,7 +1015,8 @@ class _TabsOverlay extends StatelessWidget {
             ),
             Expanded(
               child: ListView.separated(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 itemCount: manager.tabs.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, i) {
@@ -864,7 +1035,8 @@ class _TabsOverlay extends StatelessWidget {
                         t.isBlank ? '空白页' : t.url,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: _C.secondary, fontSize: 12),
+                        style:
+                            const TextStyle(color: _C.secondary, fontSize: 12),
                       ),
                       trailing: IconButton(
                         icon: const Icon(Icons.close, color: _C.secondary),
