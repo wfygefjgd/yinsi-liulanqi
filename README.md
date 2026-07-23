@@ -12,7 +12,7 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - Bundle ID: `com.tongyong.browser`（独立包名，不会覆盖旧测试包 / PHUB Player）
 - 显示名: 隐私浏览器
-- 版本: **1.6.3** (Build 21)
+- 版本: **1.7.0** (Build 22)
 - 包体: 未签名（适合侧载）
 
 ## 功能
@@ -22,7 +22,9 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 - ★ 一键收藏（最多 50）；标签最多 15
 - **阅读模式**（左下角）：章内分页再下一章；竹纸底黑字
 - **去广告点选**（书签旁）：点击页面元素隐藏
-- 广告/弹窗/跨站拦截（≡ 菜单开关）
+- 广告拦截：内置列表 + **EasyList 在线规则**（约 3 天自动 / 手动更新）
+- 长按链接：弹窗打开
+- 点选去广告可保存；长按去广告键撤销
 - **不做**下载
 
 ## 本地构建

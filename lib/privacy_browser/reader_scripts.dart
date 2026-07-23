@@ -372,6 +372,59 @@ class ReaderScripts {
 })();
 ''';
 
+  /// Long-press link → Flutter openLinkPopup(url, title).
+  static const longPressOpen = r'''
+(function(){
+  if (window.__pbLongPress) return;
+  window.__pbLongPress = true;
+  var timer = null, startX=0, startY=0, target=null;
+  function findHref(el){
+    while(el && el !== document.body){
+      if (el.tagName === 'A' && el.href) return el;
+      if (el.getAttribute && el.getAttribute('href')) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+  function clear(){ if(timer){ clearTimeout(timer); timer=null; } target=null; }
+  document.addEventListener('touchstart', function(ev){
+    if (!ev.touches || !ev.touches[0]) return;
+    startX = ev.touches[0].clientX; startY = ev.touches[0].clientY;
+    target = findHref(ev.target);
+    clear();
+    if (!target) return;
+    timer = setTimeout(function(){
+      try {
+        var href = target.href || target.getAttribute('href') || '';
+        if (!href || href.indexOf('javascript:')===0) return;
+        var title = (target.innerText||target.textContent||'').trim().slice(0,80);
+        window.flutter_inappwebview.callHandler('openLinkPopup', href, title);
+      } catch(e){}
+    }, 480);
+  }, {passive:true, capture:true});
+  document.addEventListener('touchmove', function(ev){
+    if (!ev.touches || !ev.touches[0] || !timer) return;
+    var dx = Math.abs(ev.touches[0].clientX - startX);
+    var dy = Math.abs(ev.touches[0].clientY - startY);
+    if (dx > 12 || dy > 12) clear();
+  }, {passive:true, capture:true});
+  document.addEventListener('touchend', clear, {passive:true, capture:true});
+  document.addEventListener('touchcancel', clear, {passive:true, capture:true});
+  // desktop / mouse long press
+  document.addEventListener('contextmenu', function(ev){
+    var a = findHref(ev.target);
+    if (!a) return;
+    try {
+      var href = a.href || '';
+      if (!href || href.indexOf('javascript:')===0) return;
+      ev.preventDefault();
+      var title = (a.innerText||a.textContent||'').trim().slice(0,80);
+      window.flutter_inappwebview.callHandler('openLinkPopup', href, title);
+    } catch(e){}
+  }, true);
+})();
+''';
+
   /// Click-to-hide; returns selector JSON via callHandler hideElement.
   static const elementPicker = r'''
 (function(){

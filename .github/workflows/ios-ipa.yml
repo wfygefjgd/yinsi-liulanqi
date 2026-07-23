@@ -169,26 +169,21 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.6.3
-          name: 隐私浏览器 iOS v1.6.3
+          tag_name: v1.7.0
+          name: 隐私浏览器 iOS v1.7.0
           body: |
-            ## 隐私浏览器 iOS v1.6.3
+            ## 隐私浏览器 iOS v1.7.0
 
-            ### 版本 · **1.6.3** (21) · `com.tongyong.browser`
+            ### 版本 · **1.7.0** (22) · `com.tongyong.browser`
 
-            ### 跨站（修正）
-            - **本站**（www/m 同根）：随便点、连续访问
-            - **别的站 / 广告站**：主框架跳转 **一律 CANCEL**（不是只拦自己）
-            - 地址栏/书签：仍可主动打开任意网址
-            - 禁止新窗口；广告 URL 资源拦截
-
-            ### 广告
-            - document-start/end 双注入 + 域名列表 + 弹层清理
-            - 点外链广告域名直接取消点击
-            - 点选去广告仍可保存/撤销
-
-            ### 拼接
-            - 有数字页/下一页时 **绝不** 跳下一章
+            ### 新功能
+            - **长按链接** → 底部弹窗打开网页（跨站可看，不污染主标签锁定）
+            - **EasyList 真规则源**：EasyList + EasyList China + EasyPrivacy
+              - 约 **每 3 天自动更新**
+              - ≡ 菜单 **「更新广告规则」** 手动更新
+            - 跨站：本站自由；其它站主框架拦截；广告域名硬拦
+            - 拼接：优先章内分页再下一章
+            - 点选去广告可保存 + 长按撤销
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

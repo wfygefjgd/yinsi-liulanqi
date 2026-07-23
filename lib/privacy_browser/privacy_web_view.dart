@@ -24,6 +24,7 @@ class PrivacyWebView extends StatefulWidget {
     this.crossSiteBlock = true,
     this.desktopMode = false,
     this.onUserHide,
+    this.onLongPressLink,
   });
 
   final BrowserTabModel tab;
@@ -34,6 +35,9 @@ class PrivacyWebView extends StatefulWidget {
   final bool crossSiteBlock;
   final bool desktopMode;
   final void Function(String selector, String pageUrl)? onUserHide;
+  final void Function(String url, String title)? onLongPressLink;
+  /// Long-press link → open in in-app popup sheet.
+  final void Function(String url, String title)? onLongPressLink;
 
   @override
   State<PrivacyWebView> createState() => _PrivacyWebViewState();
@@ -150,6 +154,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         );
       } catch (_) {}
     }
+    // Long-press any link / button with href → popup browser
+    try {
+      await controller.evaluateJavascript(source: ReaderScripts.longPressOpen);
+    } catch (_) {}
     try {
       final url = widget.tab.url;
       final sels = await HideStore.selectorsForUrl(url);
@@ -189,6 +197,18 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
             if (sel.isNotEmpty) {
               HideStore.addSelector(pageUrl, sel);
               widget.onUserHide?.call(sel, pageUrl);
+            }
+            return null;
+          },
+        );
+        controller.addJavaScriptHandler(
+          handlerName: 'openLinkPopup',
+          callback: (args) {
+            final url = args.isNotEmpty ? args[0]?.toString() ?? '' : '';
+            final title = args.length > 1 ? args[1]?.toString() ?? '' : '';
+            if (url.isNotEmpty &&
+                (url.startsWith('http://') || url.startsWith('https://'))) {
+              widget.onLongPressLink?.call(url, title);
             }
             return null;
           },

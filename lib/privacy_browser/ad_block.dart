@@ -1,10 +1,8 @@
-/// Ad / tracker URL detection (offline list + path heuristics).
+/// Built-in ad / tracker URL detection + bridge to online EasyList cache.
 class AdBlock {
   AdBlock._();
 
-  /// Substrings matched against host or full URL (lowercase).
   static const hostHints = <String>[
-    // Google
     'doubleclick.net',
     'googlesyndication.com',
     'googleadservices.com',
@@ -14,12 +12,10 @@ class AdBlock {
     'securepubads.g.doubleclick',
     'pagead2.googlesyndication',
     'fundingchoicesmessages.google',
-    'adservice.google',
-    'partner.googleadservices',
-    // Meta
     'facebook.net',
     'connect.facebook.net',
-    // Common ad networks
+    'adservice.google',
+    'partner.googleadservices',
     'adnxs.com',
     'adsrvr.org',
     'adsafeprotected.com',
@@ -49,7 +45,6 @@ class AdBlock {
     'adsymptotic.com',
     'ads-twitter.com',
     'static.ads-twitter.com',
-    // CN
     'gdt.qq.com',
     'mi.gdt.qq.com',
     'wxsnsdy.tc.qq.com',
@@ -76,7 +71,6 @@ class AdBlock {
     'mediav.com',
     'union.uc',
     'ad.qq.com',
-    // Adult / pop networks (common junk)
     'popads.net',
     'popcash.net',
     'propellerads.com',
@@ -98,7 +92,6 @@ class AdBlock {
     'zedo.com',
     'smartadserver.com',
     'teads.tv',
-    // generic tokens (host only match to reduce false positives)
     'adsystem',
   ];
 
@@ -128,7 +121,6 @@ class AdBlock {
     'googlesyndication',
   ];
 
-  /// Landing / redirect patterns often used by junk ads (full URL).
   static final _junkLanding = RegExp(
     r'(popunder|popads|clickadu|exoclick|juicyads|hilltopads|adsterra|'
     r'go\.php\?|redirect\.php|out\.php|jump\.php|clk\.|click\?|'
@@ -136,8 +128,14 @@ class AdBlock {
     caseSensitive: false,
   );
 
+  /// Online EasyList cache (set from main via FilterEngineBridge).
+  static bool Function(String?)? onlineBlocker;
+
   static bool isAdUrl(String? raw) {
     if (raw == null || raw.isEmpty) return false;
+    try {
+      if (onlineBlocker?.call(raw) == true) return true;
+    } catch (_) {}
     final lower = raw.toLowerCase();
     if (lower.startsWith('about:') ||
         lower.startsWith('data:') ||
@@ -154,8 +152,6 @@ class AdBlock {
     final host = u.host.toLowerCase();
     final pathQ = '${u.path}?${u.query}'.toLowerCase();
     final full = lower;
-
-    // Never treat empty host as ad
     if (host.isEmpty) return false;
 
     for (final h in hostHints) {
@@ -165,15 +161,12 @@ class AdBlock {
       if (pathQ.contains(p) || full.contains(p)) return true;
     }
     if (_junkLanding.hasMatch(full)) return true;
-
-    // Host starts with ad. / ads. / adserv
     if (RegExp(r'^(ads?|adserv|adserver|adn|adx)\.').hasMatch(host)) {
       return true;
     }
     return false;
   }
 
-  /// Same registrable-ish host family (a.com / www.a.com / m.a.com).
   static String rootish(String host) {
     var h = host.toLowerCase();
     for (final p in ['www.', 'm.', 'mobile.', 'wap.', 'www1.', 'www2.']) {

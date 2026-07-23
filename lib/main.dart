@@ -4,6 +4,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 
 import 'privacy_browser/bookmarks.dart';
+import 'privacy_browser/filter_engine.dart';
 import 'privacy_browser/privacy_browser_shell.dart';
 import 'privacy_browser/session_identity.dart';
 
@@ -15,8 +16,10 @@ Future<void> main() async {
   }
 
   // Normal browser: do NOT wipe on every launch.
-  // New identity only when user taps「换新身份」.
   SessionIdentity.mint();
+
+  // Load cached EasyList; auto-update every 3 days in background.
+  await FilterEngine.ensureLoaded();
 
   final bookmarks = BookmarkStore();
   await bookmarks.load();

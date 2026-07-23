@@ -9,7 +9,9 @@ import 'package:share_plus/share_plus.dart';
 import 'bookmarks.dart';
 import 'browser_tab_model.dart';
 import 'durable_store.dart';
+import 'filter_engine.dart';
 import 'hide_store.dart';
+import 'link_popup_page.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
 import 'reader_mode_page.dart';
@@ -97,6 +99,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     final ad = await DurableStore.getAdBlockEnabled();
     final cross = await DurableStore.getCrossSiteBlockEnabled();
     final desk = await DurableStore.getDesktopMode();
+    await FilterEngine.ensureLoaded();
     if (!mounted) return;
     setState(() {
       _stitchEnabled = stitch;
@@ -105,6 +108,18 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       _crossSiteBlock = cross;
       _desktopMode = desk;
     });
+  }
+
+  Future<void> _updateFilters() async {
+    _toast('正在更新广告规则…');
+    final msg = await FilterEngine.update(manual: true);
+    if (mounted) setState(() {});
+    _toast(msg);
+  }
+
+  void _openLinkPopup(String url, String title) {
+    if (!mounted) return;
+    LinkPopupPage.open(context, url, title: title);
   }
 
   @override
@@ -451,6 +466,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             adBlock: _adBlock,
                             crossSiteBlock: _crossSiteBlock,
                             onUserHide: _onUserHide,
+                            onLongPressLink: _openLinkPopup,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
@@ -706,15 +722,30 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                   ),
                   SwitchListTile.adaptive(
                     title: const Text('广告拦截', style: TextStyle(color: _C.text)),
-                    subtitle: const Text(
-                      '拦截广告域名/脚本/资源（真拦截）',
-                      style: TextStyle(color: _C.secondary, fontSize: 12),
+                    subtitle: Text(
+                      FilterEngine.status,
+                      style: const TextStyle(color: _C.secondary, fontSize: 11),
                     ),
                     value: _adBlock,
                     activeColor: _C.accent,
                     onChanged: (v) async {
                       await _setAdBlock(v);
                       setModal(() {});
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.system_update_alt,
+                        color: _C.accent),
+                    title:
+                        const Text('更新广告规则', style: TextStyle(color: _C.text)),
+                    subtitle: Text(
+                      'EasyList / China / Privacy · 约每 3 天自动 · 现 ${FilterEngine.hostCount} 域',
+                      style:
+                          const TextStyle(color: _C.secondary, fontSize: 11),
+                    ),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await _updateFilters();
                     },
                   ),
                   SwitchListTile.adaptive(
