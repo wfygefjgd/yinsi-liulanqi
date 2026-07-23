@@ -1,4 +1,4 @@
-package com.yinsi.liulanqi
+package com.tongyong.browser
 
 import android.os.Process
 import android.webkit.CookieManager

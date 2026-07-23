@@ -90,7 +90,7 @@ jobs:
           python3 <<PY
           import os, zipfile
           stage = "$STAGE"
-          ipa = "/tmp/Yinsi-Liulanqi-iOS.ipa"
+          ipa = "/tmp/Tongyong-Browser-iOS.ipa"
           root = os.path.join(stage, "Payload")
           assert os.path.isdir(root)
           with zipfile.ZipFile(ipa, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
@@ -122,12 +122,12 @@ jobs:
           PY
 
           mkdir -p build/ipa_dist
-          cp -f /tmp/Yinsi-Liulanqi-iOS.ipa build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
+          cp -f /tmp/Tongyong-Browser-iOS.ipa build/ipa_dist/Tongyong-Browser-iOS.ipa
           python3 - <<'PY'
           import os, hashlib
-          p = "build/ipa_dist/Yinsi-Liulanqi-iOS.ipa"
+          p = "build/ipa_dist/Tongyong-Browser-iOS.ipa"
           h = hashlib.sha256(open(p,"rb").read()).hexdigest()
-          open("build/ipa_dist/SHA256.txt","w").write(h + "  Yinsi-Liulanqi-iOS.ipa\n")
+          open("build/ipa_dist/SHA256.txt","w").write(h + "  Tongyong-Browser-iOS.ipa\n")
           print(h, os.path.getsize(p))
           PY
           ls -la build/ipa_dist/
@@ -135,9 +135,9 @@ jobs:
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Yinsi-Liulanqi-iOS
+          name: Tongyong-Browser-iOS
           path: |
-            build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
+            build/ipa_dist/Tongyong-Browser-iOS.ipa
             build/ipa_dist/SHA256.txt
           if-no-files-found: error
           retention-days: 30
@@ -145,33 +145,27 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.0
-          name: 隐私浏览器 iOS v1.1.0
+          tag_name: v1.5.0
+          name: 隐私浏览器 iOS v1.5.0
           body: |
-            ## 隐私浏览器 iOS v1.1.0
+            ## 隐私浏览器 iOS v1.5.0
 
             未签名 IPA · 全能签 / Sideloadly / AltStore / TrollStore
 
             ### 版本
-            - **Version**: 1.1.0 · **Build**: 12
-            - **Bundle ID**: `com.yinsi.liulanqi`
+            - **Version**: 1.5.0 · **Build**: 15
+            - **Bundle ID**: `com.tongyong.browser`（新包名，不覆盖旧测试包）
 
-            ### 本版功能
-            - 每次冷启动 / 退后台：**清网页痕迹**，**书签保留**
-            - **手动书签**（添加 / 删除 / 管理）
-            - **阅读模式**：正文抽取 + 挡弹窗；**拼接开关**可关
-            - 普通页轻量拦截弹窗 / `window.open`
-            - Safari 底栏 UI · 圆环图标 · 优雅退出
-            - 不做下载 / 历史
-
-            ### 底栏
-            后退 · 前进 · **阅读** · **加书签** · 书签 · 标签 · 换新身份
+            ### 本版
+            - 独立 Bundle ID，可与旧安装包共存
+            - 书签保留 / 阅读模式 / 拼接开关 / 弹窗拦截
+            - 退后台清网页痕迹，书签不删
 
             ### 下载
-            - `Yinsi-Liulanqi-iOS.ipa`
+            - `Tongyong-Browser-iOS.ipa`
             - `SHA256.txt`
           files: |
-            build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
+            build/ipa_dist/Tongyong-Browser-iOS.ipa
             build/ipa_dist/SHA256.txt
           draft: false
           prerelease: false

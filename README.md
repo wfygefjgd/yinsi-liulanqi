@@ -8,11 +8,11 @@
 
 https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
-下载 `Yinsi-Liulanqi-iOS.ipa`，用全能签 / Sideloadly / AltStore 等自签名安装。
+下载 `Tongyong-Browser-iOS.ipa`，用全能签 / Sideloadly / AltStore 等自签名安装。
 
-- Bundle ID: `com.yinsi.liulanqi`（与 PHUB Player 不同，可共存）
+- Bundle ID: `com.tongyong.browser`（独立包名，不会覆盖旧测试包 / PHUB Player）
 - 显示名: 隐私浏览器
-- 版本: **1.1.0** (Build 12)
+- 版本: **1.5.0** (Build 15)
 - 包体: 未签名（适合侧载）
 
 ## 功能
