@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -385,7 +386,7 @@ class _ReaderModePageState extends State<ReaderModePage> {
                   if (AdBlock.isAdUrl(u)) {
                     return WebResourceResponse(
                       contentType: 'text/plain',
-                      data: <int>[],
+                      data: Uint8List(0),
                       statusCode: 204,
                       reasonPhrase: 'Blocked',
                     );
