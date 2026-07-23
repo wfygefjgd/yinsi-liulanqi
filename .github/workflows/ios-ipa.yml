@@ -145,23 +145,44 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: 隐私浏览器 iOS v${{ github.run_number }}（侧载）
+          tag_name: v1.0.0
+          name: 隐私浏览器 iOS v1.0.0
           body: |
-            ## 隐私浏览器 — 未签名 IPA
+            ## 隐私浏览器 iOS v1.0.0（正式版）
 
-            自签名安装：全能签 / Sideloadly / AltStore / TrollStore
+            未签名 IPA，需自签名安装：全能签 / Sideloadly / AltStore / TrollStore
+
+            ### 版本
+            - **Version**: 1.0.0
+            - **Build**: 10
+            - **Bundle ID**: `com.yinsi.liulanqi`（独立应用，不会覆盖 PHUB Player）
+            - **显示名**: 隐私浏览器
 
             ### 下载
             - `Yinsi-Liulanqi-iOS.ipa`
             - `SHA256.txt`
 
-            Bundle ID: `com.yinsi.liulanqi`（独立应用，不会覆盖 PHUB Player）  
-            显示名: 隐私浏览器
+            ### 本版说明
+            - **每次冷启动 = 全新身份**（核清 Cookie/缓存/沙盒 + 随机 UA/语言 + 无痕 WebView）
+            - 进后台 / 点「换新身份」→ 杀进程，下次打开才是新会话
+            - **Safari 风格 UI**：底部居中地址栏、底栏工具、标签页面板
+            - 首页个人收藏书签：**Jiurelay**
+            - 蓝盾+锁 App 图标
+            - 轻量反指纹：拦截 WebRTC / Service Worker，Canvas 加噪
+
+            ### 安装
+            1. 下载 `Yinsi-Liulanqi-iOS.ipa`
+            2. 用全能签 / Sideloadly / AltStore 重签安装
+            3. 若已装旧测试包，请先卸载再装本版（避免图标/版本缓存）
+
+            ### 使用建议
+            打开 → 点收藏或搜网址 → 用完划掉 App；再开 = 第一次无痕。
+            IP 请自行用飞行模式等切换（本 App 不改网络出口）。
           files: |
             build/ipa_dist/Yinsi-Liulanqi-iOS.ipa
             build/ipa_dist/SHA256.txt
           draft: false
           prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
