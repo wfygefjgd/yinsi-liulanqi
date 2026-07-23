@@ -10,6 +10,7 @@ import 'durable_store.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
 import 'reader_mode_page.dart';
+import 'reader_scripts.dart';
 import 'session_identity.dart';
 import 'tab_manager.dart';
 
@@ -58,14 +59,14 @@ class PrivacyBrowserShell extends StatefulWidget {
 }
 
 class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
-    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   final _addressCtrl = TextEditingController();
   final _addressFocus = FocusNode();
   final Map<String, InAppWebViewController> _controllers = {};
   bool _resetting = false;
-  bool _backgroundWiped = false;
   bool _showTabs = false;
   bool _exiting = false;
+  bool _pickMode = false;
   bool _stitchEnabled = true;
   bool _popupBlock = true;
   bool _adBlock = true;
@@ -77,12 +78,12 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   @override
   void initState() {
     super.initState();
+    // Fast, light fade for manual「换新身份」only.
     _exitFade = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 520),
+      duration: const Duration(milliseconds: 180),
     );
-    _exitOpacity = CurvedAnimation(parent: _exitFade, curve: Curves.easeInOut);
-    WidgetsBinding.instance.addObserver(this);
+    _exitOpacity = CurvedAnimation(parent: _exitFade, curve: Curves.easeOut);
     _addressCtrl.text = context.read<TabManager>().active.addressText;
     _loadSettings();
   }
@@ -105,23 +106,39 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _exitFade.dispose();
     _addressCtrl.dispose();
     _addressFocus.dispose();
     super.dispose();
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden ||
-        state == AppLifecycleState.detached) {
-      if (_backgroundWiped || _resetting || _exiting) return;
-      _backgroundWiped = true;
-      _gracefulExit();
-    }
+  /// Manual only — does not run on background. Fast exit.
+  Future<void> _newIdentity() async {
+    if (_exiting || _resetting) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF2C2C2E),
+        title: const Text('换新身份', style: TextStyle(color: _C.text)),
+        content: const Text(
+          '清除全部网站数据并冷启动。书签会保留。\n平时可当普通浏览器使用，需要时再点这里。',
+          style: TextStyle(color: _C.secondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: _C.danger),
+            child: const Text('换新身份'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await _gracefulExit();
   }
 
   Future<void> _gracefulExit() async {
@@ -131,6 +148,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       setState(() {
         _resetting = true;
         _showTabs = false;
+        _pickMode = false;
       });
     }
     try {
@@ -153,8 +171,25 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       _addressCtrl.clear();
     }
 
-    await Future<void>.delayed(const Duration(milliseconds: 280));
+    // Keep exit snappy.
+    await Future<void>.delayed(const Duration(milliseconds: 60));
     await PrivacyEngine.resetAndRelaunch();
+  }
+
+  Future<void> _togglePicker() async {
+    final c = _activeController;
+    if (c == null) {
+      _toast('请先打开网页');
+      return;
+    }
+    try {
+      final r = await c.evaluateJavascript(source: ReaderScripts.elementPicker);
+      final on = r?.toString().contains('on') == true;
+      setState(() => _pickMode = on);
+      _toast(on ? '点选模式：点击要去掉的广告块，再点一次按钮结束' : '已退出点选去广告');
+    } catch (_) {
+      _toast('当前页无法启动点选');
+    }
   }
 
   InAppWebViewController? get _activeController {
@@ -509,10 +544,22 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             onTap: _showBookmarksSheet,
                           ),
                           _BarIcon(
+                            icon: _pickMode
+                                ? Icons.highlight_alt
+                                : Icons.auto_fix_high_outlined,
+                            onTap: _togglePicker,
+                            color: _pickMode ? _C.danger : null,
+                          ),
+                          _BarIcon(
                             icon: Icons.copy_all_outlined,
                             badge: '${tm.tabs.length}',
                             onTap: () =>
                                 setState(() => _showTabs = !_showTabs),
+                          ),
+                          _BarIcon(
+                            icon: Icons.shield_outlined,
+                            color: _C.danger,
+                            onTap: _newIdentity,
                           ),
                         ],
                       ),
@@ -544,7 +591,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                         ),
                         SizedBox(height: 18),
                         Text(
-                          '安全退出中',
+                          '换新身份…',
                           style: TextStyle(
                             color: Colors.white70,
                             fontSize: 15,
@@ -985,16 +1032,20 @@ class _BarIcon extends StatelessWidget {
     required this.onTap,
     this.enabled = true,
     this.badge,
+    this.color,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final bool enabled;
   final String? badge;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
-    final c = enabled ? _C.accent : _C.secondary.withOpacity(0.35);
+    final c = enabled
+        ? (color ?? _C.accent)
+        : _C.secondary.withOpacity(0.35);
     return InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(10),
@@ -1052,30 +1103,30 @@ class _SafariStartPage extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
                   children: [
-                    const Spacer(flex: 2),
+                    const SizedBox(height: 12),
                     Container(
-                      width: 78,
-                      height: 78,
+                      width: 64,
+                      height: 64,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: _C.accent, width: 6),
+                        border: Border.all(color: _C.accent, width: 5),
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     const Text(
                       '隐私浏览器',
                       style: TextStyle(
                         color: _C.text,
-                        fontSize: 28,
+                        fontSize: 26,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     Text(
-                      '全新身份 · ${sessionHint.substring(0, 6)}',
-                      style: const TextStyle(color: _C.secondary, fontSize: 13),
+                      '会话 ${sessionHint.substring(0, 6)} · 需要时点右下角换新身份',
+                      style: const TextStyle(color: _C.secondary, fontSize: 12),
                     ),
-                    const Spacer(flex: 1),
+                    const SizedBox(height: 20),
                     Row(
                       children: [
                         const Text(
@@ -1112,13 +1163,13 @@ class _SafariStartPage extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const Spacer(flex: 2),
+                    const Spacer(),
                     const Text(
-                      '★ 收藏 · ≡ 菜单 · 左下角阅读 · 进后台清痕迹',
+                      '★ 收藏 · ≡ 菜单 · 左下阅读 · 书签旁去广告 · 右下换新身份',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Color(0xFF48484A), fontSize: 12),
+                      style: TextStyle(color: Color(0xFF48484A), fontSize: 11),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ),

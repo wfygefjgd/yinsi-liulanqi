@@ -29,7 +29,8 @@ import WebKit
           result(nil)
         }
       case "exitApp":
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
+        // Snappy manual identity reset
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
           exit(0)
         }
         result(nil)

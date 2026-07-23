@@ -110,7 +110,12 @@ class _ReaderModePageState extends State<ReaderModePage> {
 
     final title = (data['title'] as String?)?.trim() ?? '';
     var html = (data['html'] as String?) ?? '';
-    final next = (data['next'] as String?)?.trim() ?? '';
+    // Prefer in-chapter next page (1→2→3), then next chapter.
+    final nextPage = (data['nextPage'] as String?)?.trim() ?? '';
+    final nextChapter = (data['nextChapter'] as String?)?.trim() ?? '';
+    final next = nextPage.isNotEmpty
+        ? nextPage
+        : ((data['next'] as String?)?.trim() ?? nextChapter);
     final pageUrl = (data['url'] as String?) ?? _loadingUrl ?? widget.initialUrl;
 
     html = _sanitizeHtml(html);
@@ -282,14 +287,15 @@ class _ReaderModePageState extends State<ReaderModePage> {
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin:0; padding:16px 18px 40px; background:#0B0B0D; color:#E8E8ED;
-    font-size:18px; line-height:1.85; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  body { margin:0; padding:18px 20px 48px; background:#E8DFC8; color:#1C1A14;
+    font-size:18px; line-height:1.9; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Songti SC", "Noto Serif SC", serif;
     word-wrap: break-word; overflow-wrap: break-word; }
-  h2.ch-title { font-size:20px; margin: 8px 0 16px; color:#fff; font-weight:600; }
-  .ch-body img { max-width:100%; height:auto; border-radius:6px; }
-  .ch-body a { color:#0A84FF; pointer-events: none; text-decoration:none; }
-  .ch-body p { margin: 0 0 0.95em; text-indent: 0; }
-  hr.sep { border:none; border-top:1px solid #2C2C2E; margin:28px 0; }
+  h2.ch-title { font-size:20px; margin: 10px 0 18px; color:#1A1812; font-weight:700; letter-spacing:0.02em; }
+  .ch-body img { max-width:100%; height:auto; border-radius:4px; }
+  .ch-body a { color:#3D5A40; pointer-events: none; text-decoration:none; }
+  .ch-body p { margin: 0 0 1em; text-indent: 2em; }
+  hr.sep { border:none; border-top:1px solid #C9BEA2; margin:28px 0; }
+  #end { color:#6B6354 !important; }
 </style></head><body>${body.toString()}</body></html>
 ''';
   }
@@ -306,25 +312,26 @@ class _ReaderModePageState extends State<ReaderModePage> {
     final showViewer = _parts.isNotEmpty && _error == null;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0B0D),
+      backgroundColor: const Color(0xFFE8DFC8),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1C1C1E),
+        backgroundColor: const Color(0xFFD9CDB0),
+        foregroundColor: const Color(0xFF1C1A14),
         title: Text(
           _parts.isNotEmpty && _parts.first.title.isNotEmpty
               ? _parts.first.title
               : (widget.initialTitle.isNotEmpty
                   ? widget.initialTitle
                   : '阅读模式'),
-          style: const TextStyle(fontSize: 16),
+          style: const TextStyle(fontSize: 16, color: Color(0xFF1C1A14)),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
           if (_stitchEnabled && _pendingNext != null)
             IconButton(
-              tooltip: '下一章',
+              tooltip: '下一页/章',
               onPressed: _stitching ? null : _stitchNext,
-              icon: const Icon(Icons.skip_next_rounded),
+              icon: const Icon(Icons.skip_next_rounded, color: Color(0xFF1C1A14)),
             ),
         ],
       ),
@@ -467,7 +474,7 @@ class _ReaderModePageState extends State<ReaderModePage> {
               right: 0,
               bottom: 0,
               child: Material(
-                color: const Color(0xEE1C1C1E),
+                color: const Color(0xEED9CDB0),
                 child: SafeArea(
                   top: false,
                   child: Padding(
@@ -480,7 +487,7 @@ class _ReaderModePageState extends State<ReaderModePage> {
                           height: 16,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Color(0xFF0A84FF),
+                            color: Color(0xFF5C6B4A),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -488,13 +495,13 @@ class _ReaderModePageState extends State<ReaderModePage> {
                           child: Text(
                             _status,
                             style: const TextStyle(
-                                color: Colors.white70, fontSize: 13),
+                                color: Color(0xFF3D382C), fontSize: 13),
                           ),
                         ),
                         if (!_stitchEnabled)
                           const Text(
                             '拼接已关',
-                            style: TextStyle(color: Colors.white38, fontSize: 12),
+                            style: TextStyle(color: Color(0xFF6B6354), fontSize: 12),
                           ),
                       ],
                     ),

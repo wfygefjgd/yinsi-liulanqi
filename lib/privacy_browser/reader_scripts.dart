@@ -198,52 +198,188 @@ class ReaderScripts {
   // collapse empty
   html = html.replace(/(<p>\s*<\/p>)+/gi, '');
 
-  // next chapter
-  var next = '';
-  var nextRe = /下一[章页节回]|下[一页章]|next\s*(chapter|page)?|›|»|>>|下一页/i;
+  // Pagination: prefer in-chapter pages 1,2,3,4,5 then next chapter.
+  var nextPage = '';
+  var nextChapter = '';
+  var kind = ''; // 'page' | 'chapter'
   var links = Array.prototype.slice.call(document.querySelectorAll('a[href]'));
-  for (var i=0;i<links.length;i++){
-    var a = links[i];
-    var tx = textOf(a);
-    var href = a.href || '';
-    if (!href || href.indexOf('javascript:')===0 || href === '#' || href.indexOf('void')>=0) continue;
-    if (nextRe.test(tx)) { next = href; break; }
-    var idc = ((a.id||'')+(a.className||'')+(a.rel||'')).toLowerCase();
-    if (/next|xia|下页|下章/.test(idc) && tx.length < 20) { next = href; break; }
+
+  function isJs(href){
+    return !href || href.indexOf('javascript:')===0 || href === '#' || href.indexOf('void')>=0;
   }
-  if (!next) {
+
+  // 1) Numbered pager: current page N -> N+1 among [1][2][3][4][5]
+  try {
+    var pageNums = [];
+    links.forEach(function(a){
+      var tx = textOf(a).replace(/\s+/g,'');
+      if (/^\d{1,3}$/.test(tx) && !isJs(a.href)) {
+        pageNums.push({ n: parseInt(tx,10), href: a.href, el: a });
+      }
+    });
+    pageNums.sort(function(a,b){ return a.n - b.n; });
+    if (pageNums.length >= 2) {
+      var cur = 0;
+      pageNums.forEach(function(p){
+        try {
+          var cls = ((p.el.className||'')+' '+(p.el.parentElement&&p.el.parentElement.className||'')).toLowerCase();
+          if (/active|current|on|select|this/.test(cls) || p.el.getAttribute('aria-current')) cur = p.n;
+        } catch(e){}
+      });
+      // infer current from URL page= / path digit
+      try {
+        var u0 = new URL(location.href);
+        ['page','p','Page','P','pageid','index'].forEach(function(k){
+          if (u0.searchParams.has(k)) {
+            var nn = parseInt(u0.searchParams.get(k),10);
+            if (!isNaN(nn)) cur = nn;
+          }
+        });
+      } catch(e){}
+      if (!cur) {
+        // if one number matches pathname tail
+        var m0 = location.pathname.match(/(\d+)(\.\w+)?$/);
+        if (m0) cur = parseInt(m0[1],10);
+      }
+      if (!cur && pageNums.length) {
+        // assume first highlighted-looking, else min
+        cur = pageNums[0].n;
+      }
+      for (var pi=0; pi<pageNums.length; pi++){
+        if (pageNums[pi].n === cur + 1) {
+          nextPage = pageNums[pi].href;
+          kind = 'page';
+          break;
+        }
+      }
+    }
+  } catch(e){}
+
+  // 2) Explicit 下一页 (page) vs 下一章 (chapter)
+  if (!nextPage) {
+    var pageRe = /下一页|下页|next\s*page|›|»|>>/i;
+    var chapRe = /下一[章节回]|下[一]?章|next\s*chapter/i;
+    for (var i=0;i<links.length;i++){
+      var a = links[i];
+      var tx = textOf(a);
+      var href = a.href || '';
+      if (isJs(href)) continue;
+      if (chapRe.test(tx) && !nextChapter) nextChapter = href;
+      if (pageRe.test(tx) && !nextPage) { nextPage = href; kind = 'page'; }
+    }
+  }
+
+  // 3) URL page param increment (in-chapter)
+  if (!nextPage) {
     try {
       var u = new URL(location.href);
-      var keys = ['page','p','Page','P','chapter','ch','cid','pageid','index'];
+      var keys = ['page','p','Page','P','pageid'];
       for (var k=0;k<keys.length;k++){
         var key = keys[k];
         if (u.searchParams.has(key)) {
           var n = parseInt(u.searchParams.get(key), 10);
           if (!isNaN(n)) {
             u.searchParams.set(key, String(n+1));
-            next = u.toString();
+            nextPage = u.toString();
+            kind = 'page';
             break;
           }
-        }
-      }
-      if (!next) {
-        var m = location.pathname.match(/(.*?)(\d+)(\.\w+)?$/);
-        if (m) {
-          var num = parseInt(m[2],10)+1;
-          next = location.origin + m[1] + num + (m[3]||'') + location.search;
         }
       }
     } catch(e){}
   }
 
+  // 4) chapter link / path fallback only if no in-chapter next
+  if (!nextChapter) {
+    for (var j=0;j<links.length;j++){
+      var a2 = links[j];
+      var tx2 = textOf(a2);
+      var href2 = a2.href || '';
+      if (isJs(href2)) continue;
+      var idc = ((a2.id||'')+(a2.className||'')).toLowerCase();
+      if (/下一[章节]|下章|next.?chapter|xia_zhang/.test(tx2+idc)) {
+        nextChapter = href2; break;
+      }
+    }
+  }
+
+  var next = nextPage || nextChapter || '';
+  if (nextPage) kind = 'page';
+  else if (nextChapter) kind = 'chapter';
+
   return JSON.stringify({
     title: title,
     html: html,
     next: next || '',
+    nextPage: nextPage || '',
+    nextChapter: nextChapter || '',
+    kind: kind,
     url: location.href,
     score: bestS,
     textLen: textLen(clone)
   });
 })();
 ''';
+
+  /// Click-to-hide element picker for manual ad removal.
+  static const elementPicker = r'''
+(function(){
+  if (window.__pbPickerOn) {
+    window.__pbPickerOff && window.__pbPickerOff();
+    return 'off';
+  }
+  window.__pbPickerOn = true;
+  var hl = null;
+  function outline(el, on){
+    if (!el || !el.style) return;
+    if (on) {
+      el.setAttribute('data-pb-prev-outline', el.style.outline || '');
+      el.style.outline = '2px solid #FF453A';
+      el.style.outlineOffset = '2px';
+    } else {
+      el.style.outline = el.getAttribute('data-pb-prev-outline') || '';
+      el.removeAttribute('data-pb-prev-outline');
+    }
+  }
+  function move(ev){
+    var t = document.elementFromPoint(ev.clientX, ev.clientY);
+    if (!t || t === document.documentElement || t === document.body) return;
+    if (hl && hl !== t) outline(hl, false);
+    hl = t;
+    outline(hl, true);
+  }
+  function click(ev){
+    ev.preventDefault();
+    ev.stopPropagation();
+    var t = hl || (ev.target);
+    if (!t) return false;
+    try {
+      // climb a bit if tiny node
+      var el = t;
+      for (var i=0;i<4 && el && el.parentElement;i++){
+        var r = el.getBoundingClientRect();
+        if (r.width * r.height > 2000) break;
+        el = el.parentElement;
+      }
+      el.style.setProperty('display','none','important');
+      el.setAttribute('data-pb-user-hide','1');
+    } catch(e){}
+    return false;
+  }
+  function off(){
+    window.__pbPickerOn = false;
+    if (hl) outline(hl, false);
+    document.removeEventListener('mousemove', move, true);
+    document.removeEventListener('touchmove', move, true);
+    document.removeEventListener('click', click, true);
+    try { window.flutter_inappwebview.callHandler('pickerDone'); } catch(e){}
+  }
+  window.__pbPickerOff = off;
+  document.addEventListener('mousemove', move, true);
+  document.addEventListener('touchmove', move, true);
+  document.addEventListener('click', click, true);
+  return 'on';
+})();
+''';
 }
+

@@ -256,9 +256,22 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           return NavigationActionPolicy.ALLOW;
         }
 
-        // Cross-site jump from page content → block.
-        if (widget.crossSiteBlock && _isCrossSite(url)) {
-          return NavigationActionPolicy.CANCEL;
+        // Same site always OK (continuous in-tab browsing).
+        if (!_isCrossSite(url)) {
+          return NavigationActionPolicy.ALLOW;
+        }
+
+        // Cross-site: allow only explicit user gesture (tap) → same tab.
+        // Auto redirects / window tricks without gesture → block.
+        // Long-press system menu can still work via allow / context menu.
+        if (widget.crossSiteBlock) {
+          final gesture = navigationAction.hasGesture == true;
+          if (!gesture) {
+            return NavigationActionPolicy.CANCEL;
+          }
+          // User tapped a link to another site: open in same tab, re-lock.
+          _lockSiteFrom(url);
+          return NavigationActionPolicy.ALLOW;
         }
 
         return NavigationActionPolicy.ALLOW;

@@ -27,7 +27,7 @@ class MainActivity : FlutterActivity() {
                         window.decorView.postDelayed({
                             finishAndRemoveTask()
                             Process.killProcess(Process.myPid())
-                        }, 550)
+                        }, 120)
                     }
                     else -> result.notImplemented()
                 }

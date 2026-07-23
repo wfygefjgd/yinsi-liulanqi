@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 
 import 'privacy_browser/bookmarks.dart';
 import 'privacy_browser/privacy_browser_shell.dart';
-import 'privacy_browser/privacy_engine.dart';
 import 'privacy_browser/session_identity.dart';
 
 Future<void> main() async {
@@ -15,8 +14,8 @@ Future<void> main() async {
     await InAppWebViewController.setWebContentsDebuggingEnabled(false);
   }
 
-  // Cold start: wipe web leftovers (bookmarks durable folder kept), new identity.
-  await PrivacyEngine.wipeOnLaunch();
+  // Normal browser: do NOT wipe on every launch.
+  // New identity only when user taps「换新身份」.
   SessionIdentity.mint();
 
   final bookmarks = BookmarkStore();
