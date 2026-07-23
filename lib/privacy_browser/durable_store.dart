@@ -5,13 +5,14 @@ import 'package:path_provider/path_provider.dart';
 
 import 'bookmarks.dart';
 
-/// Survives nuclear wipe. Only URL bookmarks + app switches (not web data).
+/// Survives nuclear wipe. Bookmarks + app switches only.
 class DurableStore {
   DurableStore._();
 
   static const durableDirName = 'durable';
   static const bookmarksFileName = 'bookmarks.json';
   static const settingsFileName = 'settings.json';
+  static const maxBookmarks = 50;
 
   static Future<Directory> durableDir() async {
     final docs = await getApplicationDocumentsDirectory();
@@ -45,6 +46,7 @@ class DurableStore {
       return list
           .map((e) => Bookmark.fromJson(Map<String, dynamic>.from(e as Map)))
           .where((b) => b.url.trim().isNotEmpty)
+          .take(maxBookmarks)
           .toList();
     } catch (_) {
       return List<Bookmark>.from(kDefaultBookmarks);
@@ -53,20 +55,25 @@ class DurableStore {
 
   static Future<void> saveBookmarks(List<Bookmark> items) async {
     final f = await _bookmarksFile();
-    final data = items.map((b) => b.toJson()).toList();
+    final clipped = items.take(maxBookmarks).toList();
+    final data = clipped.map((b) => b.toJson()).toList();
     await f.writeAsString(const JsonEncoder.withIndent('  ').convert(data));
   }
+
+  static Map<String, dynamic> get _defaults => {
+        'stitchEnabled': true,
+        'popupBlockEnabled': true,
+        'desktopMode': false,
+      };
 
   static Future<Map<String, dynamic>> loadSettings() async {
     try {
       final f = await _settingsFile();
-      if (!await f.exists()) {
-        return {'stitchEnabled': true, 'popupBlockEnabled': true};
-      }
+      if (!await f.exists()) return Map<String, dynamic>.from(_defaults);
       final raw = await f.readAsString();
-      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      return {..._defaults, ...Map<String, dynamic>.from(jsonDecode(raw) as Map)};
     } catch (_) {
-      return {'stitchEnabled': true, 'popupBlockEnabled': true};
+      return Map<String, dynamic>.from(_defaults);
     }
   }
 
@@ -94,6 +101,17 @@ class DurableStore {
   static Future<void> setPopupBlockEnabled(bool v) async {
     final s = await loadSettings();
     s['popupBlockEnabled'] = v;
+    await saveSettings(s);
+  }
+
+  static Future<bool> getDesktopMode() async {
+    final s = await loadSettings();
+    return s['desktopMode'] == true;
+  }
+
+  static Future<void> setDesktopMode(bool v) async {
+    final s = await loadSettings();
+    s['desktopMode'] = v;
     await saveSettings(s);
   }
 }

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'bookmarks.dart';
 import 'browser_tab_model.dart';
+import 'durable_store.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
 import 'reader_mode_page.dart';
@@ -20,6 +22,7 @@ class _C {
   static const text = Color(0xFFFFFFFF);
   static const secondary = Color(0xFF8E8E93);
   static const danger = Color(0xFFFF453A);
+  static const star = Color(0xFFFFD60A);
 }
 
 class PrivacyBrowserApp extends StatelessWidget {
@@ -28,7 +31,7 @@ class PrivacyBrowserApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => TabManager(maxTabs: 3),
+      create: (_) => TabManager(maxTabs: 15),
       child: MaterialApp(
         title: '隐私浏览器',
         debugShowCheckedModeBanner: false,
@@ -63,6 +66,9 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   bool _backgroundWiped = false;
   bool _showTabs = false;
   bool _exiting = false;
+  bool _stitchEnabled = true;
+  bool _popupBlock = true;
+  bool _desktopMode = false;
   late final AnimationController _exitFade;
   late final Animation<double> _exitOpacity;
 
@@ -76,6 +82,19 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     _exitOpacity = CurvedAnimation(parent: _exitFade, curve: Curves.easeInOut);
     WidgetsBinding.instance.addObserver(this);
     _addressCtrl.text = context.read<TabManager>().active.addressText;
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final stitch = await DurableStore.getStitchEnabled();
+    final popup = await DurableStore.getPopupBlockEnabled();
+    final desk = await DurableStore.getDesktopMode();
+    if (!mounted) return;
+    setState(() {
+      _stitchEnabled = stitch;
+      _popupBlock = popup;
+      _desktopMode = desk;
+    });
   }
 
   @override
@@ -129,7 +148,6 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     }
 
     await Future<void>.delayed(const Duration(milliseconds: 280));
-    // Bookmarks under Documents/durable are preserved by PrivacyEngine.
     await PrivacyEngine.resetAndRelaunch();
   }
 
@@ -161,35 +179,66 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     await _go(b.url);
   }
 
-  Future<void> _addCurrentBookmark() async {
+  String? _currentPageUrl() {
     final tab = context.read<TabManager>().active;
-    final url = tab.isBlank
-        ? _addressCtrl.text.trim()
-        : (tab.url.isNotEmpty ? tab.url : tab.addressText.trim());
-    if (url.isEmpty || url == 'about:blank') {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前没有可收藏的网址')),
-      );
+    if (!tab.isBlank && tab.url.isNotEmpty && tab.url != 'about:blank') {
+      return tab.url;
+    }
+    final t = _addressCtrl.text.trim();
+    if (t.startsWith('http://') || t.startsWith('https://')) return t;
+    return null;
+  }
+
+  Future<void> _starBookmark() async {
+    // Never focus address bar.
+    _addressFocus.unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    final url = _currentPageUrl();
+    if (url == null) {
+      _toast('请先打开一个网页再收藏');
       return;
     }
+    final tab = context.read<TabManager>().active;
+    final store = context.read<BookmarkStore>();
     final title = tab.title.isNotEmpty && tab.title != '新标签' ? tab.title : '';
-    await context.read<BookmarkStore>().add(Bookmark(title: title, url: url));
+
+    if (store.containsUrl(url)) {
+      await store.removeUrl(url);
+      _toast('已取消收藏');
+      if (mounted) setState(() {});
+      return;
+    }
+
+    final r = await store.add(Bookmark(title: title, url: url));
+    switch (r) {
+      case BookmarkAddResult.added:
+        _toast('已加入书签');
+      case BookmarkAddResult.updated:
+        _toast('书签已更新');
+      case BookmarkAddResult.full:
+        _toast('书签已满（最多 ${BookmarkStore.maxItems} 个），请先删除');
+      case BookmarkAddResult.invalid:
+        _toast('无法收藏此页');
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _toast(String msg) {
     if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已加入书签（退出后仍保留）')),
+      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
     );
   }
 
   void _openReader() {
-    final tab = context.read<TabManager>().active;
-    final url = tab.isBlank ? '' : tab.url;
-    if (url.isEmpty || url == 'about:blank') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先打开一个网页再进入阅读模式')),
-      );
+    final url = _currentPageUrl();
+    if (url == null) {
+      _toast('请先打开一个网页再进入阅读模式');
       return;
     }
+    final tab = context.read<TabManager>().active;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ReaderModePage(
@@ -200,32 +249,41 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     );
   }
 
-  Future<void> _confirmReset() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF2C2C2E),
-        title: const Text('换新身份', style: TextStyle(color: _C.text)),
-        content: const Text(
-          '清除全部网站数据并冷启动。书签会保留。',
-          style: TextStyle(color: _C.secondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: _C.danger),
-            child: const Text('立即换新'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    if (_resetting || _exiting) return;
-    await _gracefulExit();
+  Future<void> _shareCurrent() async {
+    final url = _currentPageUrl();
+    if (url == null) {
+      _toast('没有可分享的链接');
+      return;
+    }
+    final tab = context.read<TabManager>().active;
+    final title = tab.title.isNotEmpty && tab.title != '新标签' ? tab.title : url;
+    await Share.share('$title\n$url', subject: title);
+  }
+
+  Future<void> _copyLink() async {
+    final url = _currentPageUrl();
+    if (url == null) {
+      _toast('没有可复制的链接');
+      return;
+    }
+    await Clipboard.setData(ClipboardData(text: url));
+    _toast('链接已复制');
+  }
+
+  Future<void> _setStitch(bool v) async {
+    setState(() => _stitchEnabled = v);
+    await DurableStore.setStitchEnabled(v);
+  }
+
+  Future<void> _setPopup(bool v) async {
+    setState(() => _popupBlock = v);
+    await DurableStore.setPopupBlockEnabled(v);
+  }
+
+  Future<void> _setDesktop(bool v) async {
+    setState(() => _desktopMode = v);
+    await DurableStore.setDesktopMode(v);
+    // WebViews pick up via rebuild
   }
 
   void _syncAddressFromTab() {
@@ -251,6 +309,12 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     }
   }
 
+  bool _isBookmarked() {
+    final url = _currentPageUrl();
+    if (url == null) return false;
+    return context.read<BookmarkStore>().containsUrl(url);
+  }
+
   @override
   Widget build(BuildContext context) {
     final tm = context.watch<TabManager>();
@@ -259,6 +323,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     _syncAddressFromTab();
     final showHome = tab.isBlank && !tab.isLoading;
     final bottomPad = MediaQuery.of(context).padding.bottom;
+    final starred = _isBookmarked();
 
     return Scaffold(
       backgroundColor: _C.bg,
@@ -288,8 +353,10 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                       children: [
                         for (final t in tm.tabs)
                           PrivacyWebView(
-                            key: ValueKey(t.id),
+                            key: ValueKey('${t.id}_d$_desktopMode'),
                             tab: t,
+                            desktopMode: _desktopMode,
+                            popupBlock: _popupBlock,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
@@ -305,6 +372,46 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                         onOpenBookmark: _openBookmark,
                         sessionHint: SessionIdentity.current.sessionId,
                         onManageBookmarks: _showBookmarksSheet,
+                      ),
+                    // Floating reader button — bottom-left
+                    if (!showHome)
+                      Positioned(
+                        left: 12,
+                        bottom: 12,
+                        child: SafeArea(
+                          top: false,
+                          child: Material(
+                            color: _C.field,
+                            elevation: 4,
+                            borderRadius: BorderRadius.circular(22),
+                            child: InkWell(
+                              onTap: _openReader,
+                              borderRadius: BorderRadius.circular(22),
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.menu_book_rounded,
+                                        color: _C.accent, size: 20),
+                                    SizedBox(width: 6),
+                                    Text(
+                                      '阅读',
+                                      style: TextStyle(
+                                        color: _C.text,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     if (_showTabs)
                       _TabsOverlay(
@@ -329,6 +436,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                           if (tm.addTab()) {
                             _addressCtrl.clear();
                             setState(() => _showTabs = false);
+                          } else {
+                            _toast('标签已满（最多 ${tm.maxTabs} 个）');
                           }
                         },
                       ),
@@ -337,7 +446,6 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
               ),
               Material(
                 color: _C.bar,
-                elevation: 0,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -347,20 +455,23 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                       color: Color(0x33FFFFFF),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                      child: _AddressCapsule(
+                      padding: const EdgeInsets.fromLTRB(8, 10, 8, 6),
+                      child: _AddressBar(
                         controller: _addressCtrl,
                         focusNode: _addressFocus,
                         displayHost: _displayHost(tab),
                         isBlank: tab.isBlank,
                         isLoading: tab.isLoading,
+                        starred: starred,
+                        onStar: _starBookmark,
+                        onMenu: _showPageMenu,
                         onSubmit: _go,
                         onReload: () => _activeController?.reload(),
                         onStop: () => _activeController?.stopLoading(),
                       ),
                     ),
                     Padding(
-                      padding: EdgeInsets.fromLTRB(2, 0, 2, 4 + bottomPad),
+                      padding: EdgeInsets.fromLTRB(8, 0, 8, 4 + bottomPad),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
@@ -375,26 +486,14 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             onTap: () => _activeController?.goForward(),
                           ),
                           _BarIcon(
-                            icon: Icons.menu_book_rounded,
-                            onTap: _openReader,
-                          ),
-                          _BarIcon(
-                            icon: Icons.bookmark_add_outlined,
-                            onTap: _addCurrentBookmark,
-                          ),
-                          _BarIcon(
                             icon: Icons.bookmarks_outlined,
                             onTap: _showBookmarksSheet,
                           ),
                           _BarIcon(
                             icon: Icons.copy_all_outlined,
                             badge: '${tm.tabs.length}',
-                            onTap: () => setState(() => _showTabs = !_showTabs),
-                          ),
-                          _BarIcon(
-                            icon: Icons.shield_outlined,
-                            color: _C.danger,
-                            onTap: _confirmReset,
+                            onTap: () =>
+                                setState(() => _showTabs = !_showTabs),
                           ),
                         ],
                       ),
@@ -445,6 +544,125 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     );
   }
 
+  Future<void> _showPageMenu() async {
+    _addressFocus.unfocus();
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1C1C1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (ctx, setModal) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 10, bottom: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        '页面菜单',
+                        style: TextStyle(
+                          color: _C.text,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SwitchListTile.adaptive(
+                    title: const Text('拼接', style: TextStyle(color: _C.text)),
+                    subtitle: const Text(
+                      '全局开关：阅读模式自动拼下一章',
+                      style: TextStyle(color: _C.secondary, fontSize: 12),
+                    ),
+                    value: _stitchEnabled,
+                    activeColor: _C.accent,
+                    onChanged: (v) async {
+                      await _setStitch(v);
+                      setModal(() {});
+                    },
+                  ),
+                  SwitchListTile.adaptive(
+                    title: const Text('桌面模式', style: TextStyle(color: _C.text)),
+                    subtitle: const Text(
+                      '请求桌面版网页',
+                      style: TextStyle(color: _C.secondary, fontSize: 12),
+                    ),
+                    value: _desktopMode,
+                    activeColor: _C.accent,
+                    onChanged: (v) async {
+                      await _setDesktop(v);
+                      setModal(() {});
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                  ),
+                  SwitchListTile.adaptive(
+                    title: const Text('拦截弹窗', style: TextStyle(color: _C.text)),
+                    value: _popupBlock,
+                    activeColor: _C.accent,
+                    onChanged: (v) async {
+                      await _setPopup(v);
+                      setModal(() {});
+                    },
+                  ),
+                  const Divider(height: 1, color: Colors.white12),
+                  ListTile(
+                    leading: const Icon(Icons.ios_share, color: _C.accent),
+                    title: const Text('分享…', style: TextStyle(color: _C.text)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _shareCurrent();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.link, color: _C.accent),
+                    title: const Text('复制链接', style: TextStyle(color: _C.text)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _copyLink();
+                    },
+                  ),
+                  ListTile(
+                    leading:
+                        const Icon(Icons.bookmarks_outlined, color: _C.accent),
+                    title: const Text('书签', style: TextStyle(color: _C.text)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _showBookmarksSheet();
+                    },
+                  ),
+                  ListTile(
+                    leading:
+                        const Icon(Icons.copy_all_outlined, color: _C.accent),
+                    title: const Text('标签页', style: TextStyle(color: _C.text)),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      setState(() => _showTabs = true);
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _showBookmarksSheet() async {
     final store = context.read<BookmarkStore>();
     await showModalBottomSheet<void>(
@@ -477,7 +695,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                         ),
                       ),
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                         child: Row(
                           children: [
                             const Text(
@@ -489,13 +707,9 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                               ),
                             ),
                             const Spacer(),
-                            TextButton.icon(
-                              onPressed: () async {
-                                await _promptAddBookmark(ctx, store);
-                                setModal(() {});
-                              },
-                              icon: const Icon(Icons.add, size: 18),
-                              label: const Text('添加'),
+                            Text(
+                              '${items.length}/${BookmarkStore.maxItems}',
+                              style: const TextStyle(color: _C.secondary),
                             ),
                           ],
                         ),
@@ -505,8 +719,9 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                         child: Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            '退出清痕迹，书签会保留',
-                            style: TextStyle(color: _C.secondary, fontSize: 12),
+                            '地址栏 ★ 一键收藏 · 退出后仍保留',
+                            style:
+                                TextStyle(color: _C.secondary, fontSize: 12),
                           ),
                         ),
                       ),
@@ -574,77 +789,19 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       },
     );
   }
-
-  Future<void> _promptAddBookmark(BuildContext ctx, BookmarkStore store) async {
-    final titleCtrl = TextEditingController();
-    final urlCtrl = TextEditingController();
-    final tab = context.read<TabManager>().active;
-    if (!tab.isBlank) {
-      urlCtrl.text = tab.url;
-      titleCtrl.text = tab.title == '新标签' ? '' : tab.title;
-    }
-    final ok = await showDialog<bool>(
-      context: ctx,
-      builder: (dCtx) => AlertDialog(
-        backgroundColor: const Color(0xFF2C2C2E),
-        title: const Text('添加书签', style: TextStyle(color: _C.text)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: titleCtrl,
-              style: const TextStyle(color: _C.text),
-              decoration: const InputDecoration(
-                labelText: '名称（可选）',
-                labelStyle: TextStyle(color: _C.secondary),
-              ),
-            ),
-            TextField(
-              controller: urlCtrl,
-              style: const TextStyle(color: _C.text),
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: '网址',
-                labelStyle: TextStyle(color: _C.secondary),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dCtx, false),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dCtx, true),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    if (ok == true) {
-      var url = urlCtrl.text.trim();
-      if (url.isNotEmpty &&
-          !url.startsWith('http://') &&
-          !url.startsWith('https://')) {
-        url = 'https://$url';
-      }
-      if (url.isNotEmpty) {
-        await store.add(Bookmark(title: titleCtrl.text.trim(), url: url));
-      }
-    }
-    titleCtrl.dispose();
-    urlCtrl.dispose();
-  }
 }
 
-class _AddressCapsule extends StatelessWidget {
-  const _AddressCapsule({
+/// ★ | ≡ | narrow field | reload — star/menu never focus the text field.
+class _AddressBar extends StatelessWidget {
+  const _AddressBar({
     required this.controller,
     required this.focusNode,
     required this.displayHost,
     required this.isBlank,
     required this.isLoading,
+    required this.starred,
+    required this.onStar,
+    required this.onMenu,
     required this.onSubmit,
     required this.onReload,
     required this.onStop,
@@ -655,6 +812,9 @@ class _AddressCapsule extends StatelessWidget {
   final String displayHost;
   final bool isBlank;
   final bool isLoading;
+  final bool starred;
+  final VoidCallback onStar;
+  final VoidCallback onMenu;
   final void Function(String) onSubmit;
   final VoidCallback onReload;
   final VoidCallback onStop;
@@ -667,24 +827,43 @@ class _AddressCapsule extends StatelessWidget {
         final focused = focusNode.hasFocus;
         return Container(
           height: 44,
-          alignment: Alignment.center,
           decoration: BoxDecoration(
             color: _C.field,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: _C.fieldBorder, width: 0.5),
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const SizedBox(width: 12),
-              Icon(
-                isBlank || focused
-                    ? Icons.search_rounded
-                    : Icons.lock_outline_rounded,
-                size: 16,
-                color: _C.secondary,
+              // ★ bookmark — separate hit target, no focus
+              SizedBox(
+                width: 40,
+                height: 44,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  splashRadius: 20,
+                  onPressed: onStar,
+                  icon: Icon(
+                    starred ? Icons.star_rounded : Icons.star_border_rounded,
+                    size: 22,
+                    color: starred ? _C.star : _C.secondary,
+                  ),
+                ),
               ),
-              const SizedBox(width: 8),
+              // ≡ menu
+              SizedBox(
+                width: 36,
+                height: 44,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  splashRadius: 20,
+                  onPressed: onMenu,
+                  icon: const Icon(
+                    Icons.menu_rounded,
+                    size: 22,
+                    color: _C.secondary,
+                  ),
+                ),
+              ),
               Expanded(
                 child: TextField(
                   controller: controller,
@@ -692,7 +871,7 @@ class _AddressCapsule extends StatelessWidget {
                   textAlign: TextAlign.center,
                   textAlignVertical: TextAlignVertical.center,
                   style: const TextStyle(
-                    fontSize: 15,
+                    fontSize: 14,
                     color: _C.text,
                     fontWeight: FontWeight.w500,
                     height: 1.25,
@@ -711,11 +890,11 @@ class _AddressCapsule extends StatelessWidget {
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(vertical: 12),
                     hintText: isBlank
-                        ? '搜索或输入网站名称'
+                        ? '搜索或输入网站'
                         : (focused ? null : displayHost),
                     hintStyle: const TextStyle(
                       color: _C.secondary,
-                      fontSize: 15,
+                      fontSize: 14,
                       fontWeight: FontWeight.w400,
                       height: 1.25,
                     ),
@@ -729,15 +908,18 @@ class _AddressCapsule extends StatelessWidget {
                   },
                 ),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                onPressed: isLoading ? onStop : onReload,
-                icon: Icon(
-                  isLoading ? Icons.close_rounded : Icons.refresh_rounded,
-                  size: 20,
-                  color: _C.accent,
+              SizedBox(
+                width: 40,
+                height: 44,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  splashRadius: 20,
+                  onPressed: isLoading ? onStop : onReload,
+                  icon: Icon(
+                    isLoading ? Icons.close_rounded : Icons.refresh_rounded,
+                    size: 20,
+                    color: _C.accent,
+                  ),
                 ),
               ),
             ],
@@ -753,33 +935,30 @@ class _BarIcon extends StatelessWidget {
     required this.icon,
     required this.onTap,
     this.enabled = true,
-    this.color,
     this.badge,
   });
 
   final IconData icon;
   final VoidCallback onTap;
   final bool enabled;
-  final Color? color;
   final String? badge;
 
   @override
   Widget build(BuildContext context) {
-    final c =
-        enabled ? (color ?? _C.accent) : _C.secondary.withOpacity(0.35);
+    final c = enabled ? _C.accent : _C.secondary.withOpacity(0.35);
     return InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(10),
       child: SizedBox(
-        width: 44,
+        width: 52,
         height: 40,
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Icon(icon, size: 24, color: c),
+            Icon(icon, size: 26, color: c),
             if (badge != null)
               Positioned(
-                right: 6,
+                right: 8,
                 bottom: 6,
                 child: Text(
                   badge!,
@@ -831,23 +1010,6 @@ class _SafariStartPage extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(color: _C.accent, width: 6),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _C.accent.withOpacity(0.35),
-                            blurRadius: 24,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: Center(
-                        child: Container(
-                          width: 22,
-                          height: 22,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _C.accent.withOpacity(0.35),
-                          ),
-                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -857,7 +1019,6 @@ class _SafariStartPage extends StatelessWidget {
                         color: _C.text,
                         fontSize: 28,
                         fontWeight: FontWeight.w700,
-                        letterSpacing: -0.5,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -879,28 +1040,24 @@ class _SafariStartPage extends StatelessWidget {
                         const Spacer(),
                         TextButton(
                           onPressed: onManageBookmarks,
-                          child: const Text(
-                            '管理',
-                            style: TextStyle(fontSize: 13),
-                          ),
+                          child: const Text('管理', style: TextStyle(fontSize: 13)),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Wrap(
                         spacing: 20,
                         runSpacing: 16,
                         children: [
-                          for (final b in bookmarks)
+                          for (final b in bookmarks.take(20))
                             _FavoriteTile(
                               title: b.title,
                               onTap: () => onOpenBookmark(b),
                             ),
                           if (bookmarks.isEmpty)
                             const Text(
-                              '点底栏书签按钮添加',
+                              '地址栏左侧 ★ 可收藏当前页',
                               style: TextStyle(color: Color(0xFF48484A)),
                             ),
                         ],
@@ -908,7 +1065,7 @@ class _SafariStartPage extends StatelessWidget {
                     ),
                     const Spacer(flex: 2),
                     const Text(
-                      '底栏：阅读模式 · 加书签 · 书签 · 标签 · 换新身份',
+                      '★ 收藏 · ≡ 菜单 · 左下角阅读 · 进后台清痕迹',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Color(0xFF48484A), fontSize: 12),
                     ),

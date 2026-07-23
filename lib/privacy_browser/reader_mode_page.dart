@@ -61,14 +61,6 @@ class _ReaderModePageState extends State<ReaderModePage> {
     }
   }
 
-  Future<void> _toggleStitch(bool v) async {
-    setState(() => _stitchEnabled = v);
-    await DurableStore.setStitchEnabled(v);
-    if (v && _pendingNext != null) {
-      // ready for more
-    }
-  }
-
   Future<void> _onWorkerCreated(InAppWebViewController c) async {
     _worker = c;
     await c.loadUrl(urlRequest: URLRequest(url: WebUri(widget.initialUrl)));
@@ -204,7 +196,7 @@ class _ReaderModePageState extends State<ReaderModePage> {
 
   @override
   Widget build(BuildContext context) {
-    final ua = SessionIdentity.current.userAgent;
+    final ua = SessionIdentity.current.userAgent(desktop: false);
     return Scaffold(
       backgroundColor: const Color(0xFF0B0B0D),
       appBar: AppBar(
@@ -218,16 +210,6 @@ class _ReaderModePageState extends State<ReaderModePage> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('拼接', style: TextStyle(fontSize: 13, color: Colors.white70)),
-              Switch.adaptive(
-                value: _stitchEnabled,
-                onChanged: _toggleStitch,
-              ),
-            ],
-          ),
           if (_pendingNext != null && _stitchEnabled)
             IconButton(
               tooltip: '下一章',

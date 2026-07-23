@@ -14,12 +14,14 @@ class PrivacyWebView extends StatefulWidget {
     required this.onChanged,
     required this.onControllerReady,
     this.popupBlock = true,
+    this.desktopMode = false,
   });
 
   final BrowserTabModel tab;
   final TabChanged onChanged;
   final void Function(InAppWebViewController controller) onControllerReady;
   final bool popupBlock;
+  final bool desktopMode;
 
   @override
   State<PrivacyWebView> createState() => _PrivacyWebViewState();
@@ -53,9 +55,11 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       isFraudulentWebsiteWarningEnabled: false,
       sharedCookiesEnabled: false,
       limitsNavigationsToAppBoundDomains: false,
-      userAgent: id.userAgent,
+      userAgent: id.userAgent(desktop: widget.desktopMode),
+      preferredContentMode: widget.desktopMode
+          ? UserPreferredContentMode.DESKTOP
+          : UserPreferredContentMode.MOBILE,
       saveFormData: false,
-      // Block most window.open popups at engine level.
       javaScriptCanOpenWindowsAutomatically: false,
       supportMultipleWindows: false,
     );
@@ -63,6 +67,23 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
 
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void didUpdateWidget(covariant PrivacyWebView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.desktopMode != widget.desktopMode) {
+      _applyDesktop();
+    }
+  }
+
+  Future<void> _applyDesktop() async {
+    final c = _controller;
+    if (c == null) return;
+    try {
+      await c.setSettings(settings: _settings);
+      await c.reload();
+    } catch (_) {}
+  }
 
   Future<void> _inject(InAppWebViewController controller) async {
     try {
@@ -145,7 +166,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        // Never open popup windows — load in same tab if URL known.
         final url = createWindowAction.request.url;
         if (url != null) {
           await controller.loadUrl(urlRequest: URLRequest(url: url));

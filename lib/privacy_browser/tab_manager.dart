@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'browser_tab_model.dart';
 
 class TabManager extends ChangeNotifier {
-  TabManager({this.maxTabs = 3}) {
+  TabManager({this.maxTabs = 15}) {
     _tabs.add(BrowserTabModel(id: _nextId()));
   }
 

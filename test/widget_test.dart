@@ -6,20 +6,20 @@ import 'package:yinsi_liulanqi/privacy_browser/privacy_browser_shell.dart';
 import 'package:yinsi_liulanqi/privacy_browser/tab_manager.dart';
 
 void main() {
-  testWidgets('shell builds with bookmark provider', (tester) async {
+  testWidgets('shell builds', (tester) async {
     final store = BookmarkStore();
-    // skip durable load in unit test — inject empty ready list
     await tester.pumpWidget(
       MultiProvider(
         providers: [
           ChangeNotifierProvider.value(value: store),
-          ChangeNotifierProvider(create: (_) => TabManager(maxTabs: 3)),
+          ChangeNotifierProvider(create: (_) => TabManager(maxTabs: 15)),
         ],
         child: const MaterialApp(home: PrivacyBrowserShell()),
       ),
     );
     await tester.pump();
-    expect(find.text('搜索或输入网站名称'), findsOneWidget);
-    expect(find.text('个人收藏'), findsOneWidget);
+    expect(find.text('搜索或输入网站'), findsOneWidget);
+    expect(find.byIcon(Icons.star_border_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.menu_rounded), findsOneWidget);
   });
 }

@@ -1,23 +1,29 @@
 import 'dart:math';
 
-/// In-memory only. Regenerated every process start = "first open" identity.
+/// In-memory only. Regenerated every process start.
 class SessionIdentity {
   SessionIdentity._({
-    required this.userAgent,
+    required this.mobileUserAgent,
     required this.language,
     required this.sessionId,
   });
 
-  final String userAgent;
+  final String mobileUserAgent;
   final String language;
   final String sessionId;
+
+  static const desktopUserAgent =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15';
 
   static SessionIdentity? _current;
   static SessionIdentity get current => _current ??= mint();
 
+  String userAgent({required bool desktop}) =>
+      desktop ? desktopUserAgent : mobileUserAgent;
+
   static SessionIdentity mint() {
     final rng = Random.secure();
-    final iosMajor = 16 + rng.nextInt(3); // 16–18
+    final iosMajor = 16 + rng.nextInt(3);
     final iosMinor = rng.nextInt(5);
     final safariMajor = iosMajor;
     final ua =
@@ -25,9 +31,10 @@ class SessionIdentity {
         'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/$safariMajor.0 '
         'Mobile/15E148 Safari/604.1';
     const langs = ['zh-CN', 'zh-TW', 'en-US', 'en-GB', 'ja-JP'];
-    final id = List.generate(16, (_) => rng.nextInt(16).toRadixString(16)).join();
+    final id =
+        List.generate(16, (_) => rng.nextInt(16).toRadixString(16)).join();
     final s = SessionIdentity._(
-      userAgent: ua,
+      mobileUserAgent: ua,
       language: langs[rng.nextInt(langs.length)],
       sessionId: id,
     );
@@ -35,8 +42,6 @@ class SessionIdentity {
     return s;
   }
 
-  /// Anti-fingerprint + block common trackers of "same browser again".
-  /// Applied once per document load (incognito first-open style).
   String get injectScript => '''
 (function() {
   try {
@@ -65,31 +70,6 @@ class SessionIdentity {
     if (navigator.serviceWorker) {
       navigator.serviceWorker.register = function() {
         return Promise.reject(new Error('blocked'));
-      };
-    }
-  } catch (e) {}
-  try {
-    var noise = function(canvas) {
-      try {
-        var ctx = canvas.getContext && canvas.getContext('2d');
-        if (!ctx || !ctx.getImageData) return;
-        var orig = ctx.getImageData.bind(ctx);
-        ctx.getImageData = function(x, y, w, h) {
-          var d = orig(x, y, w, h);
-          if (d && d.data && d.data.length) {
-            d.data[0] = d.data[0] ^ (${sessionId.hashCode.abs() % 7});
-          }
-          return d;
-        };
-      } catch (e) {}
-    };
-    var desc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'getContext');
-    if (desc && desc.value) {
-      var origGet = desc.value;
-      HTMLCanvasElement.prototype.getContext = function() {
-        var c = origGet.apply(this, arguments);
-        noise(this);
-        return c;
       };
     }
   } catch (e) {}

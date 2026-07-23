@@ -27,7 +27,6 @@ class Bookmark {
   }
 }
 
-/// Seed only when durable file is missing.
 const List<Bookmark> kDefaultBookmarks = [
   Bookmark(
     title: 'Jiurelay',
@@ -35,14 +34,20 @@ const List<Bookmark> kDefaultBookmarks = [
   ),
 ];
 
+enum BookmarkAddResult { added, updated, full, invalid }
+
 class BookmarkStore extends ChangeNotifier {
   BookmarkStore();
+
+  static const maxItems = DurableStore.maxBookmarks;
 
   List<Bookmark> _items = [];
   bool _ready = false;
 
   List<Bookmark> get items => List.unmodifiable(_items);
   bool get ready => _ready;
+  int get count => _items.length;
+  bool get isFull => _items.length >= maxItems;
 
   Future<void> load() async {
     _items = await DurableStore.loadBookmarks();
@@ -50,9 +55,15 @@ class BookmarkStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> add(Bookmark b) async {
+  bool containsUrl(String url) {
+    final u = url.trim();
+    if (u.isEmpty) return false;
+    return _items.any((e) => e.url == u);
+  }
+
+  Future<BookmarkAddResult> add(Bookmark b) async {
     final url = b.url.trim();
-    if (url.isEmpty) return;
+    if (url.isEmpty || url == 'about:blank') return BookmarkAddResult.invalid;
     final exists = _items.any((e) => e.url == url);
     if (exists) {
       _items = [
@@ -65,19 +76,23 @@ class BookmarkStore extends ChangeNotifier {
           else
             e,
       ];
-    } else {
-      _items = [
-        ..._items,
-        Bookmark(
-          title: b.title.trim().isEmpty
-              ? Bookmark._titleFromUrl(url)
-              : b.title.trim(),
-          url: url,
-        ),
-      ];
+      await DurableStore.saveBookmarks(_items);
+      notifyListeners();
+      return BookmarkAddResult.updated;
     }
+    if (_items.length >= maxItems) return BookmarkAddResult.full;
+    _items = [
+      ..._items,
+      Bookmark(
+        title: b.title.trim().isEmpty
+            ? Bookmark._titleFromUrl(url)
+            : b.title.trim(),
+        url: url,
+      ),
+    ];
     await DurableStore.saveBookmarks(_items);
     notifyListeners();
+    return BookmarkAddResult.added;
   }
 
   Future<void> removeAt(int index) async {
@@ -91,5 +106,13 @@ class BookmarkStore extends ChangeNotifier {
     _items = _items.where((e) => e.url != url).toList();
     await DurableStore.saveBookmarks(_items);
     notifyListeners();
+  }
+
+  Future<void> toggle(Bookmark b) async {
+    if (containsUrl(b.url)) {
+      await removeUrl(b.url.trim());
+    } else {
+      await add(b);
+    }
   }
 }
