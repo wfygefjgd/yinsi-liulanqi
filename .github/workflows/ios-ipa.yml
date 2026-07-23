@@ -1,0 +1,167 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: pub get
+        run: flutter pub get
+
+      - name: Build iOS release (device, no codesign)
+        run: flutter build ios --release --no-codesign
+
+      - name: Package sideload IPA (unsigned)
+        run: |
+          set -euo pipefail
+          SRC="build/ios/iphoneos/Runner.app"
+          test -d "$SRC"
+          test -f "$SRC/Runner"
+          test -f "$SRC/Info.plist"
+
+          STAGE="/tmp/privacy_ipa_stage_$$"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/Payload"
+
+          /usr/bin/ditto -V --norsrc --noextattr --noqtn "$SRC" "$STAGE/Payload/Runner.app"
+          find "$STAGE/Payload/Runner.app" -type l -print0 | while IFS= read -r -d '' link; do
+            target=$(readlink "$link" || true)
+            if [ -n "$target" ]; then
+              dir=$(dirname "$link")
+              if [ -e "$dir/$target" ]; then
+                rm -f "$link"
+                /usr/bin/ditto "$dir/$target" "$link"
+              elif [ -e "$target" ]; then
+                rm -f "$link"
+                /usr/bin/ditto "$target" "$link"
+              else
+                echo "WARN dangling symlink: $link -> $target"
+                rm -f "$link"
+              fi
+            fi
+          done
+
+          APP="$STAGE/Payload/Runner.app"
+          xattr -cr "$APP" || true
+          chmod +x "$APP/Runner" || true
+          [ -f "$APP/Frameworks/Flutter.framework/Flutter" ] && chmod +x "$APP/Frameworks/Flutter.framework/Flutter"
+          [ -f "$APP/Frameworks/App.framework/App" ] && chmod +x "$APP/Frameworks/App.framework/App"
+
+          thin_arm64() {
+            local bin="$1"
+            [ -f "$bin" ] || return 0
+            local info
+            info=$(lipo -info "$bin" 2>/dev/null || true)
+            echo "lipo $bin : $info"
+            if echo "$info" | grep -q "Architectures in the fat file" && echo "$info" | grep -q arm64; then
+              lipo -thin arm64 "$bin" -output "${bin}.thin"
+              mv "${bin}.thin" "$bin"
+              chmod +x "$bin"
+            fi
+          }
+          thin_arm64 "$APP/Runner"
+          thin_arm64 "$APP/Frameworks/Flutter.framework/Flutter"
+          thin_arm64 "$APP/Frameworks/App.framework/App"
+          find "$APP/Frameworks" -type f \( -name "*.dylib" -o -perm -111 \) 2>/dev/null | while read -r f; do
+            thin_arm64 "$f" || true
+          done
+
+          if find "$APP" -type l | grep -q .; then
+            echo "ERROR: symlinks still present:"
+            find "$APP" -type l
+            exit 1
+          fi
+
+          python3 <<PY
+          import os, zipfile
+          stage = "$STAGE"
+          ipa = "/tmp/Privacy-Browser-iOS.ipa"
+          root = os.path.join(stage, "Payload")
+          assert os.path.isdir(root)
+          with zipfile.ZipFile(ipa, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+              for dirpath, dirnames, filenames in os.walk(root):
+                  dirnames.sort()
+                  filenames.sort()
+                  rel_dir = os.path.relpath(dirpath, stage).replace("\\\\", "/")
+                  if rel_dir == ".":
+                      rel_dir = ""
+                  if rel_dir:
+                      entry = rel_dir.replace("\\\\", "/").rstrip("/") + "/"
+                      zinfo = zipfile.ZipInfo(entry)
+                      zinfo.external_attr = (0o755 << 16) | 0x10
+                      zf.writestr(zinfo, b"")
+                  for name in filenames:
+                      full = os.path.join(dirpath, name)
+                      arc = os.path.relpath(full, stage).replace("\\\\", "/")
+                      if os.path.islink(full):
+                          continue
+                      zinfo = zipfile.ZipInfo.from_file(full, arc)
+                      if os.access(full, os.X_OK) or name in ("Runner", "Flutter", "App") or name.endswith(".dylib"):
+                          zinfo.external_attr = (0o755 << 16)
+                      else:
+                          zinfo.external_attr = (0o644 << 16)
+                      zinfo.compress_type = zipfile.ZIP_DEFLATED
+                      with open(full, "rb") as f:
+                          zf.writestr(zinfo, f.read())
+          print("wrote", ipa, os.path.getsize(ipa))
+          PY
+
+          mkdir -p build/ipa_dist
+          cp -f /tmp/Privacy-Browser-iOS.ipa build/ipa_dist/Privacy-Browser-iOS.ipa
+          python3 - <<'PY'
+          import os, hashlib
+          p = "build/ipa_dist/Privacy-Browser-iOS.ipa"
+          h = hashlib.sha256(open(p,"rb").read()).hexdigest()
+          open("build/ipa_dist/SHA256.txt","w").write(h + "  Privacy-Browser-iOS.ipa\n")
+          print(h, os.path.getsize(p))
+          PY
+          ls -la build/ipa_dist/
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Privacy-Browser-iOS
+          path: |
+            build/ipa_dist/Privacy-Browser-iOS.ipa
+            build/ipa_dist/SHA256.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: 隐私浏览器 iOS v${{ github.run_number }}（侧载）
+          body: |
+            ## 隐私浏览器 — 未签名 IPA
+
+            自签名安装：全能签 / Sideloadly / AltStore / TrollStore
+
+            ### 下载
+            - `Privacy-Browser-iOS.ipa`
+            - `SHA256.txt`
+
+            Bundle ID: `com.phub.player.phubPlayer`  
+            显示名: 隐私浏览器
+          files: |
+            build/ipa_dist/Privacy-Browser-iOS.ipa
+            build/ipa_dist/SHA256.txt
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
