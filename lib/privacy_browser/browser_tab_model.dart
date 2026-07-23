@@ -1,7 +1,14 @@
 import 'package:flutter/foundation.dart';
 
 class BrowserTabModel {
-  BrowserTabModel({required this.id, this.initialUrl = ''});
+  BrowserTabModel({required this.id, String initialUrl = ''}) {
+    if (initialUrl.isNotEmpty) {
+      pendingUrl = initialUrl;
+      url = initialUrl;
+      addressText = initialUrl;
+      title = '加载中…';
+    }
+  }
 
   final String id;
   final UniqueKey viewKey = UniqueKey();
