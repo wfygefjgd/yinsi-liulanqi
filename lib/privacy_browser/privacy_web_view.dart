@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'ad_block.dart';
 import 'browser_tab_model.dart';
+import 'hide_store.dart';
 import 'reader_scripts.dart';
 import 'session_identity.dart';
 
@@ -18,8 +20,9 @@ class PrivacyWebView extends StatefulWidget {
     required this.onControllerReady,
     this.popupBlock = true,
     this.adBlock = true,
-    this.crossSiteBlock = true,
+    this.crossSiteBlock = false,
     this.desktopMode = false,
+    this.onUserHide,
   });
 
   final BrowserTabModel tab;
@@ -29,6 +32,7 @@ class PrivacyWebView extends StatefulWidget {
   final bool adBlock;
   final bool crossSiteBlock;
   final bool desktopMode;
+  final void Function(String selector, String pageUrl)? onUserHide;
 
   @override
   State<PrivacyWebView> createState() => _PrivacyWebViewState();
@@ -47,8 +51,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       domStorageEnabled: true,
       databaseEnabled: false,
       cacheEnabled: false,
-      clearCache: true,
-      clearSessionCache: true,
+      clearCache: false,
       thirdPartyCookiesEnabled: false,
       mediaPlaybackRequiresUserGesture: true,
       allowsInlineMediaPlayback: true,
@@ -62,17 +65,28 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       allowsLinkPreview: false,
       isFraudulentWebsiteWarningEnabled: false,
       sharedCookiesEnabled: false,
-      limitsNavigationsToAppBoundDomains: false,
       userAgent: id.userAgent(desktop: widget.desktopMode),
       preferredContentMode: widget.desktopMode
           ? UserPreferredContentMode.DESKTOP
           : UserPreferredContentMode.MOBILE,
       saveFormData: false,
+      // Allow normal navigation; block only true popups via onCreateWindow.
       javaScriptCanOpenWindowsAutomatically: false,
       supportMultipleWindows: false,
       useShouldOverrideUrlLoading: true,
       useShouldInterceptRequest: true,
     );
+  }
+
+  UnmodifiableListView<UserScript> get _userScripts {
+    final list = <UserScript>[];
+    if (widget.adBlock || widget.popupBlock) {
+      list.add(UserScript(
+        source: ReaderScripts.adAndPopupBlock,
+        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+      ));
+    }
+    return UnmodifiableListView(list);
   }
 
   @override
@@ -83,10 +97,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.desktopMode != widget.desktopMode) {
       _applyDesktop();
-    } else if (oldWidget.adBlock != widget.adBlock ||
-        oldWidget.crossSiteBlock != widget.crossSiteBlock ||
-        oldWidget.popupBlock != widget.popupBlock) {
-      _controller?.setSettings(settings: _settings);
     }
   }
 
@@ -132,6 +142,16 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         );
       } catch (_) {}
     }
+    // Re-apply user manual hides for this host
+    try {
+      final url = widget.tab.url;
+      final sels = await HideStore.selectorsForUrl(url);
+      if (sels.isNotEmpty) {
+        await controller.evaluateJavascript(
+          source: HideStore.applyScript(sels),
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _syncNav() async {
@@ -149,8 +169,23 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       key: widget.tab.viewKey,
       initialUrlRequest: URLRequest(url: WebUri('about:blank')),
       initialSettings: _settings,
+      initialUserScripts: _userScripts,
       onWebViewCreated: (controller) {
         _controller = controller;
+        controller.addJavaScriptHandler(
+          handlerName: 'hideElement',
+          callback: (args) {
+            final sel = args.isNotEmpty ? args[0]?.toString() ?? '' : '';
+            final pageUrl = args.length > 1
+                ? args[1]?.toString() ?? widget.tab.url
+                : widget.tab.url;
+            if (sel.isNotEmpty) {
+              HideStore.addSelector(pageUrl, sel);
+              widget.onUserHide?.call(sel, pageUrl);
+            }
+            return null;
+          },
+        );
         widget.onControllerReady(controller);
       },
       onLoadStart: (controller, url) {
@@ -174,8 +209,12 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       },
       onLoadStop: (controller, url) async {
         await _inject(controller);
-        // Re-inject after short delay (late ads)
-        Future<void>.delayed(const Duration(milliseconds: 600), () async {
+        Future<void>.delayed(const Duration(milliseconds: 500), () async {
+          try {
+            await _inject(controller);
+          } catch (_) {}
+        });
+        Future<void>.delayed(const Duration(milliseconds: 1500), () async {
           try {
             await _inject(controller);
           } catch (_) {}
@@ -186,9 +225,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         if (s.isNotEmpty) {
           if (_siteRoot == null) _lockSiteFrom(s);
           widget.tab.url = s;
-          if (s != 'about:blank') {
-            widget.tab.addressText = s;
-          }
+          if (s != 'about:blank') widget.tab.addressText = s;
         }
         final title = await controller.getTitle();
         if (title != null && title.trim().isNotEmpty) {
@@ -213,7 +250,12 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        // Hard block pop-up windows.
+        // Popup windows blocked; user can long-press for system open if needed.
+        final u = createWindowAction.request.url;
+        if (u != null && !AdBlock.isAdUrl(u.toString())) {
+          // Soft: open same tab instead of new window
+          await controller.loadUrl(urlRequest: URLRequest(url: u));
+        }
         return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
@@ -228,21 +270,15 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           return NavigationActionPolicy.ALLOW;
         }
 
-        // Block known ad / tracker navigations.
+        // Always block hard-ad navigations (main or sub).
         if (widget.adBlock && AdBlock.isAdUrl(url)) {
           return NavigationActionPolicy.CANCEL;
         }
 
         final isMain = navigationAction.isForMainFrame ?? true;
-        if (!isMain) {
-          // Subframe: still block ad frames.
-          if (widget.adBlock && AdBlock.isAdUrl(url)) {
-            return NavigationActionPolicy.CANCEL;
-          }
-          return NavigationActionPolicy.ALLOW;
-        }
+        if (!isMain) return NavigationActionPolicy.ALLOW;
 
-        // Address bar / bookmark intentional navigation.
+        // Address bar / bookmark
         if (widget.tab.allowCrossSiteOnce) {
           _siteRoot = null;
           _lockSiteFrom(url);
@@ -250,28 +286,24 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           return NavigationActionPolicy.ALLOW;
         }
 
-        // First page in blank tab.
         if (_siteRoot == null || widget.tab.isBlank) {
           _lockSiteFrom(url);
           return NavigationActionPolicy.ALLOW;
         }
 
-        // Same site always OK (continuous in-tab browsing).
-        if (!_isCrossSite(url)) {
-          return NavigationActionPolicy.ALLOW;
-        }
-
-        // Cross-site: allow only explicit user gesture (tap) → same tab.
-        // Auto redirects / window tricks without gesture → block.
-        // Long-press system menu can still work via allow / context menu.
-        if (widget.crossSiteBlock) {
-          final gesture = navigationAction.hasGesture == true;
-          if (!gesture) {
+        // Default: ALLOW almost all main-frame navigations (normal browsing).
+        // Optional cross-site mode: only cancel silent auto redirects to other roots.
+        if (widget.crossSiteBlock && _isCrossSite(url)) {
+          final gesture = navigationAction.hasGesture;
+          // iOS often reports null for hasGesture — treat null as allow.
+          if (gesture == false) {
             return NavigationActionPolicy.CANCEL;
           }
-          // User tapped a link to another site: open in same tab, re-lock.
           _lockSiteFrom(url);
-          return NavigationActionPolicy.ALLOW;
+        } else if (!_isCrossSite(url)) {
+          // same site ok
+        } else {
+          _lockSiteFrom(url);
         }
 
         return NavigationActionPolicy.ALLOW;

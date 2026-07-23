@@ -169,24 +169,20 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.6.0
-          name: 隐私浏览器 iOS v1.6.0
+          tag_name: v1.6.1
+          name: 隐私浏览器 iOS v1.6.1
           body: |
-            ## 隐私浏览器 iOS v1.6.0
-
-            未签名 IPA · 全能签 / Sideloadly / AltStore / TrollStore
+            ## 隐私浏览器 iOS v1.6.1
 
             ### 版本
-            - **Version**: 1.6.0 · **Build**: 18
-            - **Bundle ID**: `com.tongyong.browser`
+            - **1.6.1** (Build 19) · Bundle ID `com.tongyong.browser`
 
-            ### 本版重点
-            - **默认当普通浏览器**：切后台不再自动清数据
-            - **右下角「换新身份」**：仅手动触发核清（书签保留）；退出更快
-            - **阅读**：章内分页 1→2→3 再下一章；竹纸底黑字
-            - **链接**：同站单击当前页连续访问；跨站无手势自动跳才拦
-            - **去广告**：底栏书签旁点选模式，点击页面广告块隐藏
-            - 首页布局上移；广告/弹窗真拦截仍可用
+            ### 本版
+            - **点选去广告可保存**：按站点记住 CSS，下次自动藏；**长按去广告键撤销**
+            - **广告拦截加强**：document-start 脚本 + 更多域名/CSS 伪装
+            - **跨站默认关**；开启时只拦无手势自动跨站（不挡正常点击）
+            - **拼接**：强制优先数字分页/下一页，再下一章
+            - 仍保留：手动换新身份、竹纸阅读、★/≡ 等
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

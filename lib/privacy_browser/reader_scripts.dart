@@ -1,12 +1,12 @@
-/// Injected JS: ad/popup DOM cleanup + readability-style extract + next chapter.
+/// Injected JS: ad/popup cleanup, reader extract, element picker (with selector).
 class ReaderScripts {
   ReaderScripts._();
 
-  /// Stronger runtime ad/popup/DOM cleanup (runs on page + interval).
+  /// Stronger runtime ad/popup/DOM cleanup + early CSS cosmetic.
   static const adAndPopupBlock = r'''
 (function(){
-  if (window.__pbAdBlockV2) return;
-  window.__pbAdBlockV2 = true;
+  if (window.__pbAdBlockV3) return;
+  window.__pbAdBlockV3 = true;
 
   try { window.open = function(){ return null; }; } catch(e){}
   try {
@@ -15,7 +15,25 @@ class ReaderScripts {
     window.prompt = function(){ return null; };
   } catch(e){}
 
-  var AD_RE = /doubleclick|googlesyndication|googleadservices|googletagmanager|pagead|adservice|adnxs|adsrvr|taboola|outbrain|criteo|scorecardresearch|cnzz|umeng|baidu\.com\/cpro|pos\.baidu|hm\.baidu|tanx\.com|popads|popcash|propeller|exoclick|juicyads|trafficjunky|adsterra|hilltopads|media\.net|moatads|hotjar|clarity\.ms|facebook\.net\/tr|analytics|prebid|adsbygoogle|adframe|adserver|partner\.googleadservices/i;
+  // Cosmetic CSS early
+  try {
+    var st = document.createElement('style');
+    st.id = 'pb-ad-css';
+    st.textContent = [
+      'iframe[src*="google"],iframe[src*="doubleclick"],iframe[src*="ads"],iframe[src*="adservice"],',
+      'iframe[src*="ad."],iframe[id*="ad"],iframe[class*="ad"],',
+      'ins.adsbygoogle,[id*="google_ads"],[class*="google-ad"],',
+      '[class*="adsbox"],[id*="adsbox"],[class*="ad-box"],[class*="ad_box"],',
+      '[class*="advert"],[id*="advert"],[class*="adbanner"],[id*="banner_ad"],',
+      '[class*="popup"],[id*="popup"],[class*="pop-up"],[class*="float-ad"],',
+      '[id*="float"],[class*="floatads"],[class*="gg_"],[id*="gg_"],',
+      '[class*="guanggao"],[id*="guanggao"],.ads,.ad,.AD,',
+      '#ads,#ad,#AD,#googlead,#div_ad,[onclick*="open("]'
+    ].join('') + '{display:none!important;visibility:hidden!important;height:0!important;max-height:0!important;overflow:hidden!important;pointer-events:none!important;}';
+    (document.documentElement||document.head||document.body).appendChild(st);
+  } catch(e){}
+
+  var AD_RE = /doubleclick|googlesyndication|googleadservices|googletagmanager|pagead|adservice|adnxs|adsrvr|taboola|outbrain|criteo|scorecardresearch|cnzz|umeng|baidu\.com\/cpro|pos\.baidu|hm\.baidu|tanx\.com|popads|popcash|propeller|exoclick|juicyads|trafficjunky|adsterra|hilltopads|media\.net|moatads|hotjar|clarity\.ms|facebook\.net|analytics|prebid|adsbygoogle|adframe|adserver|partner\.googleadservices|gdt\.qq|lianmeng|mediav|union\.uc|pangolin|pglstatp|bytead|toutiao|snssdk|adkwai|adsystem|securepubads|googletagservices|fundingchoices|cookiebot|onesignal/i;
 
   function killNode(el){
     try {
@@ -28,7 +46,7 @@ class ReaderScripts {
 
   function scrub(){
     try {
-      document.querySelectorAll('script[src],iframe[src],img[src],link[href]').forEach(function(el){
+      document.querySelectorAll('script[src],iframe[src],img[src],link[href],video[src],source[src]').forEach(function(el){
         var s = el.src || el.href || '';
         if (s && AD_RE.test(s)) {
           try { el.remove(); } catch(e){ killNode(el); }
@@ -39,34 +57,33 @@ class ReaderScripts {
         '[class*="popup"]','[id*="popup"]','[class*="Popup"]','[id*="Popup"]',
         '[class*="modal"]','[id*="modal"]','[class*="Modal"]',
         '[class*="advert"]','[class*="Advert"]','[class*="adsbox"]','[class*="ad-box"]',
-        '[id*="ads"]','[class*="ads-"]','[class*="ad_"]','[class*=" ad "]',
+        '[id*="ads"]','[class*="ads-"]','[class*="ad_"]',
         '[class*="mask"]','[class*="overlay"]','[class*="dialog"]',
         '[class*="float"]','[id*="float"]','[class*="banner"]',
         'iframe[src*="ads"]','iframe[src*="doubleclick"]','iframe[src*="googlesyndication"]',
-        '[class*="gg"]','[id*="gg"]','[class*="guanggao"]'
+        '[class*="gg"]','[id*="gg"]','[class*="guanggao"]','ins.adsbygoogle'
       ];
       document.querySelectorAll(sel.join(',')).forEach(function(el){
-        if (el.getAttribute('data-pb-killed')) return;
+        if (el.getAttribute('data-pb-killed') || el.getAttribute('data-pb-user-hide')) return;
         try {
           var st = getComputedStyle(el);
           var r = el.getBoundingClientRect();
           var fixed = st.position === 'fixed' || st.position === 'sticky';
-          var big = r.width > window.innerWidth * 0.45 || r.height > window.innerHeight * 0.35;
+          var big = r.width > window.innerWidth * 0.4 || r.height > window.innerHeight * 0.3;
           var z = parseInt(st.zIndex,10) || 0;
-          if (fixed || big || z > 1000) killNode(el);
+          if (fixed || big || z > 800) killNode(el);
         } catch(e){}
       });
 
-      // full-screen fixed layers
       document.querySelectorAll('div,section,aside').forEach(function(el){
-        if (el.getAttribute('data-pb-killed')) return;
+        if (el.getAttribute('data-pb-killed') || el.getAttribute('data-pb-user-hide')) return;
         try {
           var st = getComputedStyle(el);
           if (st.position !== 'fixed' && st.position !== 'sticky') return;
           var r = el.getBoundingClientRect();
-          if (r.width >= window.innerWidth * 0.9 && r.height >= window.innerHeight * 0.5) {
+          if (r.width >= window.innerWidth * 0.85 && r.height >= window.innerHeight * 0.4) {
             var txt = (el.innerText||'').length;
-            if (txt < 80) killNode(el);
+            if (txt < 120) killNode(el);
           }
         } catch(e){}
       });
@@ -80,12 +97,10 @@ class ReaderScripts {
   }
 
   scrub();
-  setInterval(scrub, 800);
-
-  // MutationObserver for late ads
+  setInterval(scrub, 700);
   try {
-    var mo = new MutationObserver(function(){ scrub(); });
-    mo.observe(document.documentElement, { childList:true, subtree:true });
+    new MutationObserver(function(){ scrub(); })
+      .observe(document.documentElement, { childList:true, subtree:true });
   } catch(e){}
 
   document.addEventListener('click', function(ev){
@@ -97,29 +112,26 @@ class ReaderScripts {
 })();
 ''';
 
-  /// Legacy alias
   static const popupBlock = adAndPopupBlock;
 
-  /// Readability-like extract: densest text block + next chapter heuristics.
+  /// Extract + pagination: numbered pages first, then 下一页, then 下一章.
   static const extractArticle = r'''
 (function(){
   function textOf(el){
     return (el && (el.innerText || el.textContent) || '').replace(/\s+/g,' ').trim();
   }
   function textLen(el){ return textOf(el).length; }
-
   function isBad(el){
     if (!el || !el.tagName) return true;
     var t = el.tagName.toLowerCase();
     if (/^(script|style|nav|footer|header|aside|form|button|input|noscript|svg|iframe)$/.test(t)) return true;
     var cls = ((el.className&&el.className.toString)||'') + ' ' + (el.id||'');
     cls = cls.toLowerCase();
-    if (/nav|menu|footer|header|comment|sidebar|recommend|related|share|social|tool|ad[-_]|ads|banner|popup|modal|copyright|breadcrumb|pager|pagination(?![-_]?content)/i.test(cls) && !/chapter|content|article|read|novel|book|txt|nr/.test(cls)) {
+    if (/nav|menu|footer|header|comment|sidebar|recommend|related|share|social|tool|ad[-_]|ads|banner|popup|modal|copyright|breadcrumb/i.test(cls) && !/chapter|content|article|read|novel|book|txt|nr|page/.test(cls)) {
       return true;
     }
     return false;
   }
-
   function score(el){
     if (!el || isBad(el)) return -99999;
     var t = textLen(el);
@@ -127,24 +139,21 @@ class ReaderScripts {
     var p = el.querySelectorAll('p').length;
     var br = el.querySelectorAll('br').length;
     var a = el.querySelectorAll('a').length;
-    var img = el.querySelectorAll('img').length;
     var linkDensity = a / Math.max(1, el.querySelectorAll('*').length);
-    var s = t + p * 50 + br * 8 - a * 12 - img * 5;
+    var s = t + p * 50 + br * 8 - a * 12;
     if (linkDensity > 0.35) s -= 400;
     var cls = ((el.className&&el.className.toString)||'') + ' ' + (el.id||'');
     cls = cls.toLowerCase();
-    if (/chapter|content|article|read|novel|booktext|book_text|nr1|\bnr\b|txt|main|post/.test(cls)) s += 350;
-    if (/list|item|card|grid|hot|rank/.test(cls)) s -= 200;
+    if (/chapter|content|article|read|novel|booktext|nr1|\bnr\b|txt|main|post/.test(cls)) s += 350;
     return s;
   }
 
   var selectors = [
     'article','#content','#Content','.content','.Content',
     '#chaptercontent','#chapterContent','.chapter-content','.chapter_content',
-    '#BookText','#booktext','.read-content','.read_content','.novelcontent','.novel_content',
+    '#BookText','#booktext','.read-content','.read_content','.novelcontent',
     'main','.post-content','.entry-content','#nr1','#nr','.txt','#txt',
-    '#js_content','.rich_media_content','#article','.article','.article-content',
-    '#chapter','#Chapter','.chapter','.Chapter'
+    '#js_content','.rich_media_content','#article','.article-content','.chapter'
   ];
   var cands = [];
   selectors.forEach(function(sel){
@@ -155,31 +164,20 @@ class ReaderScripts {
       if (textLen(el) > 120) cands.push(el);
     });
   }
-
   var best = null, bestS = -1;
   cands.forEach(function(el){
     var s = score(el);
     if (s > bestS) { bestS = s; best = el; }
   });
-
-  // climb to better parent if child is thin
   if (best && best.parentElement) {
-    var parent = best.parentElement;
-    var ps = score(parent);
-    if (ps > bestS * 1.05 && ps - bestS > 80) {
-      best = parent; bestS = ps;
-    }
+    var ps = score(best.parentElement);
+    if (ps > bestS * 1.05 && ps - bestS > 80) { best = best.parentElement; bestS = ps; }
   }
+  if (!best || bestS < 60) { best = document.body; bestS = score(best); }
 
-  if (!best || bestS < 60) {
-    best = document.body;
-    bestS = score(best);
-  }
-
-  // clone and strip junk inside
   var clone = best.cloneNode(true);
   clone.querySelectorAll('script,style,iframe,ins,nav,footer,header,form,button,aside,noscript').forEach(function(n){ n.remove(); });
-  clone.querySelectorAll('[class*="ad"],[id*="ad"],[class*="popup"],[class*="share"],[class*="recommend"],[class*="related"]').forEach(function(n){
+  clone.querySelectorAll('[class*="ad"],[id*="ad"],[class*="popup"],[class*="share"],[class*="recommend"]').forEach(function(n){
     try { n.remove(); } catch(e){}
   });
 
@@ -191,31 +189,28 @@ class ReaderScripts {
     if (h2) title = textOf(h2);
   }
   if (!title) title = (document.title||'').trim();
-  // strip site name
   title = title.replace(/\s*[-_|].*$/,'').trim() || title;
-
-  var html = clone.innerHTML || '';
-  // collapse empty
-  html = html.replace(/(<p>\s*<\/p>)+/gi, '');
-
-  // Pagination: prefer in-chapter pages 1,2,3,4,5 then next chapter.
-  var nextPage = '';
-  var nextChapter = '';
-  var kind = ''; // 'page' | 'chapter'
-  var links = Array.prototype.slice.call(document.querySelectorAll('a[href]'));
+  var html = (clone.innerHTML || '').replace(/(<p>\s*<\/p>)+/gi, '');
 
   function isJs(href){
     return !href || href.indexOf('javascript:')===0 || href === '#' || href.indexOf('void')>=0;
   }
+  var links = Array.prototype.slice.call(document.querySelectorAll('a[href]'));
+  var nextPage = '';
+  var nextChapter = '';
+  var kind = '';
 
-  // 1) Numbered pager: current page N -> N+1 among [1][2][3][4][5]
+  // A) Numbered pager 1 2 3 4 5 — highest priority
   try {
     var pageNums = [];
+    var seenN = {};
     links.forEach(function(a){
       var tx = textOf(a).replace(/\s+/g,'');
-      if (/^\d{1,3}$/.test(tx) && !isJs(a.href)) {
-        pageNums.push({ n: parseInt(tx,10), href: a.href, el: a });
-      }
+      if (!/^\d{1,3}$/.test(tx) || isJs(a.href)) return;
+      var n = parseInt(tx,10);
+      if (seenN[n]) return;
+      seenN[n] = 1;
+      pageNums.push({ n: n, href: a.href, el: a });
     });
     pageNums.sort(function(a,b){ return a.n - b.n; });
     if (pageNums.length >= 2) {
@@ -223,28 +218,37 @@ class ReaderScripts {
       pageNums.forEach(function(p){
         try {
           var cls = ((p.el.className||'')+' '+(p.el.parentElement&&p.el.parentElement.className||'')).toLowerCase();
-          if (/active|current|on|select|this/.test(cls) || p.el.getAttribute('aria-current')) cur = p.n;
+          if (/active|current|on|select|this|cur/.test(cls) || p.el.getAttribute('aria-current')) cur = p.n;
+          // bold / strong current
+          if (p.el.querySelector && p.el.querySelector('b,strong,em')) cur = p.n;
+          var st = getComputedStyle(p.el);
+          if (parseInt(st.fontWeight,10) >= 600 || st.fontWeight === 'bold') cur = p.n;
         } catch(e){}
       });
-      // infer current from URL page= / path digit
       try {
         var u0 = new URL(location.href);
-        ['page','p','Page','P','pageid','index'].forEach(function(k){
+        ['page','p','Page','P','pageid','index','pg'].forEach(function(k){
           if (u0.searchParams.has(k)) {
             var nn = parseInt(u0.searchParams.get(k),10);
-            if (!isNaN(nn)) cur = nn;
+            if (!isNaN(nn) && nn > 0) cur = nn;
           }
         });
+        // path like /123_2.html chapter_page
+        var mPath = location.pathname.match(/_(\d+)(\.\w+)?$/);
+        if (mPath) {
+          var pn = parseInt(mPath[1],10);
+          if (!isNaN(pn) && pn < 50) cur = pn;
+        }
       } catch(e){}
       if (!cur) {
-        // if one number matches pathname tail
-        var m0 = location.pathname.match(/(\d+)(\.\w+)?$/);
-        if (m0) cur = parseInt(m0[1],10);
+        // find link matching current URL
+        pageNums.forEach(function(p){
+          try {
+            if (p.href.split('#')[0] === location.href.split('#')[0]) cur = p.n;
+          } catch(e){}
+        });
       }
-      if (!cur && pageNums.length) {
-        // assume first highlighted-looking, else min
-        cur = pageNums[0].n;
-      }
+      if (!cur) cur = pageNums[0].n;
       for (var pi=0; pi<pageNums.length; pi++){
         if (pageNums[pi].n === cur + 1) {
           nextPage = pageNums[pi].href;
@@ -255,50 +259,55 @@ class ReaderScripts {
     }
   } catch(e){}
 
-  // 2) Explicit 下一页 (page) vs 下一章 (chapter)
+  // B) 下一页 text (NOT 下一章)
   if (!nextPage) {
-    var pageRe = /下一页|下页|next\s*page|›|»|>>/i;
-    var chapRe = /下一[章节回]|下[一]?章|next\s*chapter/i;
     for (var i=0;i<links.length;i++){
       var a = links[i];
       var tx = textOf(a);
-      var href = a.href || '';
-      if (isJs(href)) continue;
-      if (chapRe.test(tx) && !nextChapter) nextChapter = href;
-      if (pageRe.test(tx) && !nextPage) { nextPage = href; kind = 'page'; }
+      if (isJs(a.href)) continue;
+      // strict page: 下一页 / 下页 — exclude 章
+      if (/下一页|下页|next\s*page/i.test(tx) && !/章|节|回/.test(tx)) {
+        nextPage = a.href; kind = 'page'; break;
+      }
     }
   }
 
-  // 3) URL page param increment (in-chapter)
+  // C) page= in URL
   if (!nextPage) {
     try {
       var u = new URL(location.href);
-      var keys = ['page','p','Page','P','pageid'];
+      var keys = ['page','p','Page','P','pageid','pg'];
       for (var k=0;k<keys.length;k++){
-        var key = keys[k];
-        if (u.searchParams.has(key)) {
-          var n = parseInt(u.searchParams.get(key), 10);
+        if (u.searchParams.has(keys[k])) {
+          var n = parseInt(u.searchParams.get(keys[k]), 10);
           if (!isNaN(n)) {
-            u.searchParams.set(key, String(n+1));
-            nextPage = u.toString();
+            u.searchParams.set(keys[k], String(n+1));
+            nextPage = u.toString(); kind = 'page'; break;
+          }
+        }
+      }
+      // /xxx_2.html -> _3.html
+      if (!nextPage) {
+        var m = location.pathname.match(/^(.*_)(\d+)(\.\w+)?$/);
+        if (m) {
+          var num = parseInt(m[2],10);
+          if (!isNaN(num) && num < 80) {
+            nextPage = location.origin + m[1] + (num+1) + (m[3]||'') + location.search;
             kind = 'page';
-            break;
           }
         }
       }
     } catch(e){}
   }
 
-  // 4) chapter link / path fallback only if no in-chapter next
-  if (!nextChapter) {
+  // D) 下一章 ONLY if no next page
+  if (!nextPage) {
     for (var j=0;j<links.length;j++){
       var a2 = links[j];
       var tx2 = textOf(a2);
-      var href2 = a2.href || '';
-      if (isJs(href2)) continue;
-      var idc = ((a2.id||'')+(a2.className||'')).toLowerCase();
-      if (/下一[章节]|下章|next.?chapter|xia_zhang/.test(tx2+idc)) {
-        nextChapter = href2; break;
+      if (isJs(a2.href)) continue;
+      if (/下一[章节回]|下[一]?章|next\s*chapter/i.test(tx2)) {
+        nextChapter = a2.href; kind = 'chapter'; break;
       }
     }
   }
@@ -321,7 +330,7 @@ class ReaderScripts {
 })();
 ''';
 
-  /// Click-to-hide element picker for manual ad removal.
+  /// Click-to-hide; returns selector JSON via callHandler hideElement.
   static const elementPicker = r'''
 (function(){
   if (window.__pbPickerOn) {
@@ -330,6 +339,43 @@ class ReaderScripts {
   }
   window.__pbPickerOn = true;
   var hl = null;
+
+  function cssEscape(s){
+    try { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g,'\\$&'); }
+    catch(e){ return String(s); }
+  }
+
+  function cssPath(el){
+    if (!el || el.nodeType !== 1) return '';
+    if (el.id) return '#' + cssEscape(el.id);
+    var parts = [];
+    var cur = el;
+    for (var depth=0; depth<6 && cur && cur.nodeType===1 && cur !== document.body && cur !== document.documentElement; depth++){
+      var name = cur.tagName.toLowerCase();
+      if (cur.id) { parts.unshift('#' + cssEscape(cur.id)); break; }
+      var parent = cur.parentElement;
+      if (!parent) { parts.unshift(name); break; }
+      var cls = '';
+      try {
+        if (cur.classList && cur.classList.length) {
+          var c0 = cur.classList[0];
+          if (c0 && c0.length < 40 && !/active|hover|open|show/.test(c0)) {
+            cls = '.' + cssEscape(c0);
+          }
+        }
+      } catch(e){}
+      var same = parent.children ? Array.prototype.filter.call(parent.children, function(x){ return x.tagName === cur.tagName; }) : [];
+      if (same.length > 1) {
+        var idx = Array.prototype.indexOf.call(same, cur) + 1;
+        parts.unshift(name + cls + ':nth-of-type(' + idx + ')');
+      } else {
+        parts.unshift(name + cls);
+      }
+      cur = parent;
+    }
+    return parts.join(' > ');
+  }
+
   function outline(el, on){
     if (!el || !el.style) return;
     if (on) {
@@ -341,45 +387,53 @@ class ReaderScripts {
       el.removeAttribute('data-pb-prev-outline');
     }
   }
+
   function move(ev){
-    var t = document.elementFromPoint(ev.clientX, ev.clientY);
+    var x = ev.clientX, y = ev.clientY;
+    if (ev.touches && ev.touches[0]) { x = ev.touches[0].clientX; y = ev.touches[0].clientY; }
+    var t = document.elementFromPoint(x, y);
     if (!t || t === document.documentElement || t === document.body) return;
     if (hl && hl !== t) outline(hl, false);
     hl = t;
     outline(hl, true);
   }
+
   function click(ev){
     ev.preventDefault();
     ev.stopPropagation();
-    var t = hl || (ev.target);
+    var t = hl || ev.target;
     if (!t) return false;
     try {
-      // climb a bit if tiny node
       var el = t;
-      for (var i=0;i<4 && el && el.parentElement;i++){
+      for (var i=0;i<5 && el && el.parentElement;i++){
         var r = el.getBoundingClientRect();
-        if (r.width * r.height > 2000) break;
+        if (r.width * r.height > 2500) break;
         el = el.parentElement;
       }
+      var sel = cssPath(el);
       el.style.setProperty('display','none','important');
       el.setAttribute('data-pb-user-hide','1');
+      try {
+        window.flutter_inappwebview.callHandler('hideElement', sel || '', location.href);
+      } catch(e){}
     } catch(e){}
     return false;
   }
+
   function off(){
     window.__pbPickerOn = false;
     if (hl) outline(hl, false);
     document.removeEventListener('mousemove', move, true);
+    document.removeEventListener('touchstart', move, true);
     document.removeEventListener('touchmove', move, true);
     document.removeEventListener('click', click, true);
-    try { window.flutter_inappwebview.callHandler('pickerDone'); } catch(e){}
   }
   window.__pbPickerOff = off;
   document.addEventListener('mousemove', move, true);
+  document.addEventListener('touchstart', move, true);
   document.addEventListener('touchmove', move, true);
   document.addEventListener('click', click, true);
   return 'on';
 })();
 ''';
 }
-

@@ -64,7 +64,7 @@ class DurableStore {
         'stitchEnabled': true,
         'popupBlockEnabled': true,
         'adBlockEnabled': true,
-        'crossSiteBlockEnabled': true,
+        'crossSiteBlockEnabled': false,
         'desktopMode': false,
       };
 

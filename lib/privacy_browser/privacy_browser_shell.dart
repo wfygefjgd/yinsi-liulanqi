@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -7,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 import 'bookmarks.dart';
 import 'browser_tab_model.dart';
 import 'durable_store.dart';
+import 'hide_store.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
 import 'reader_mode_page.dart';
@@ -70,7 +73,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   bool _stitchEnabled = true;
   bool _popupBlock = true;
   bool _adBlock = true;
-  bool _crossSiteBlock = true;
+  bool _crossSiteBlock = false;
   bool _desktopMode = false;
   late final AnimationController _exitFade;
   late final Animation<double> _exitOpacity;
@@ -186,10 +189,46 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       final r = await c.evaluateJavascript(source: ReaderScripts.elementPicker);
       final on = r?.toString().contains('on') == true;
       setState(() => _pickMode = on);
-      _toast(on ? '点选模式：点击要去掉的广告块，再点一次按钮结束' : '已退出点选去广告');
+      _toast(on
+          ? '点选去广告：点要藏的块（会记住本站）；长按本按钮可撤销'
+          : '已退出点选');
     } catch (_) {
       _toast('当前页无法启动点选');
     }
+  }
+
+  Future<void> _undoHide() async {
+    final sel = await HideStore.undoLast();
+    if (sel == null) {
+      _toast('没有可撤销的隐藏');
+      return;
+    }
+    final c = _activeController;
+    if (c != null) {
+      try {
+        // Show again elements matching last selector (best-effort)
+        await c.evaluateJavascript(
+          source: '''
+(function(){
+  try {
+    document.querySelectorAll(${jsonEncode(sel)}).forEach(function(el){
+      el.style.removeProperty('display');
+      el.removeAttribute('data-pb-user-hide');
+    });
+  } catch(e){}
+})();
+''',
+        );
+      } catch (_) {}
+    }
+    if (mounted) setState(() {});
+    _toast('已撤销一处隐藏（本站规则已更新）');
+  }
+
+  void _onUserHide(String selector, String pageUrl) {
+    if (!mounted) return;
+    setState(() {});
+    _toast('已隐藏并记住本站（长按去广告键可撤销）');
   }
 
   InAppWebViewController? get _activeController {
@@ -411,6 +450,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             popupBlock: _popupBlock,
                             adBlock: _adBlock,
                             crossSiteBlock: _crossSiteBlock,
+                            onUserHide: _onUserHide,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
@@ -543,12 +583,15 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             icon: Icons.bookmarks_outlined,
                             onTap: _showBookmarksSheet,
                           ),
-                          _BarIcon(
-                            icon: _pickMode
-                                ? Icons.highlight_alt
-                                : Icons.auto_fix_high_outlined,
-                            onTap: _togglePicker,
-                            color: _pickMode ? _C.danger : null,
+                          GestureDetector(
+                            onLongPress: _undoHide,
+                            child: _BarIcon(
+                              icon: _pickMode
+                                  ? Icons.highlight_alt
+                                  : Icons.auto_fix_high_outlined,
+                              onTap: _togglePicker,
+                              color: _pickMode ? _C.danger : null,
+                            ),
                           ),
                           _BarIcon(
                             icon: Icons.copy_all_outlined,
@@ -677,7 +720,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                   SwitchListTile.adaptive(
                     title: const Text('跨站拦截', style: TextStyle(color: _C.text)),
                     subtitle: const Text(
-                      '阻止页面跳到其它网站（地址栏/书签可跳）',
+                      '默认关。开启后仅拦「无手势」的跨站自动跳转',
                       style: TextStyle(color: _C.secondary, fontSize: 12),
                     ),
                     value: _crossSiteBlock,
