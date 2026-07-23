@@ -14,8 +14,8 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.text('搜索或输入网址'), findsOneWidget);
-    expect(find.byTooltip('换新身份'), findsOneWidget);
+    expect(find.text('搜索或输入网站名称'), findsOneWidget);
     expect(find.text('Jiurelay'), findsOneWidget);
+    expect(find.text('个人收藏'), findsOneWidget);
   });
 }

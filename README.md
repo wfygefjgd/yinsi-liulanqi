@@ -12,7 +12,7 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - Bundle ID: `com.yinsi.liulanqi`（与 PHUB Player 不同，可共存）
 - 显示名: 隐私浏览器
-- 版本: 1.1.0 (3)
+- 版本: 1.1.1 (4)
 - 包体: 未签名（适合侧载）
 
 ## 功能
