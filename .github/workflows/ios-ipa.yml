@@ -169,22 +169,22 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.7.1
-          name: 隐私浏览器 iOS v1.7.1
+          tag_name: v1.7.2
+          name: 隐私浏览器 iOS v1.7.2
           body: |
-            ## 隐私浏览器 iOS v1.7.1
+            ## 隐私浏览器 iOS v1.7.2
 
-            ### 版本 · **1.7.1** (23) · `com.tongyong.browser`
+            ### 版本 · **1.7.2** (24) · `com.tongyong.browser`
 
-            ### 本版（硬改吐槽点）
-            - **全局拼接**：≡ 打开后，**任意网页**滑到底自动拼下一页（先 1·2·3/下一页，再下一章）
-            - 阅读器同样页优先于章
-            - **赌博/垃圾弹窗**：外链关键词加强 + 死 window.open
-            - EasyList 仍可 ≡「更新广告规则」
-            - 长按链接弹窗打开外站
+            ### 拼接（mumu 类）
+            - `12062.html` → `12062_2.html` → `12062_3.html` → … → `12063.html`
+            - 全局拼接 + 阅读器同一套 URL 算术
 
-            ### 说明
-            东方永夜鸡是油猴脚本，无法整包当插件装进 WebView；全局拼接按同域 fetch 追加实现。
+            ### 长按
+            - 原生 hit-test + JS 长按双通道打开弹窗
+
+            ### 广告
+            - EasyList 更新；点选保存；赌博关键词
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`
