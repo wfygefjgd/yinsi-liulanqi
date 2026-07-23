@@ -3,9 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 
+import 'bookmarks.dart';
 import 'browser_tab_model.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
+import 'session_identity.dart';
 import 'tab_manager.dart';
 
 class PrivacyBrowserApp extends StatelessWidget {
@@ -16,7 +18,7 @@ class PrivacyBrowserApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => TabManager(maxTabs: 3),
       child: MaterialApp(
-        title: 'Privacy Browser',
+        title: '隐私浏览器',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
@@ -66,33 +68,15 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Leave app → full wipe + kill process so next open is true cold start.
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       if (_backgroundWiped || _resetting) return;
       _backgroundWiped = true;
-      _silentBackgroundWipe();
-    } else if (state == AppLifecycleState.resumed) {
-      if (_backgroundWiped) {
-        _backgroundWiped = false;
-        _rebuildAfterWipe();
-      }
+      _controllers.clear();
+      PrivacyEngine.resetAndRelaunch();
     }
-  }
-
-  Future<void> _silentBackgroundWipe() async {
-    _controllers.clear();
-    await PrivacyEngine.nuclearWipe(exitAfter: false);
-    if (!mounted) return;
-    context.read<TabManager>().hardResetTabs();
-    _addressCtrl.clear();
-  }
-
-  void _rebuildAfterWipe() {
-    if (!mounted) return;
-    setState(() {});
-    final tab = context.read<TabManager>().active;
-    _addressCtrl.text = tab.addressText;
   }
 
   InAppWebViewController? get _activeController {
@@ -117,6 +101,12 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     if (c == null) return;
     await c.loadUrl(urlRequest: URLRequest(url: uri));
     _addressFocus.unfocus();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openBookmark(Bookmark b) async {
+    _addressCtrl.text = b.url;
+    await _go(b.url);
   }
 
   Future<void> _confirmReset() async {
@@ -124,9 +114,9 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1E),
-        title: const Text('重置浏览器', style: TextStyle(color: Colors.white)),
+        title: const Text('换新身份', style: TextStyle(color: Colors.white)),
         content: const Text(
-          '将清除全部网站数据、缓存、Cookie、本地文件与设置，并强制冷启动。等同于重新安装。',
+          '清除全部网站数据并强制冷启动。下次打开 = 全新第一次无痕。',
           style: TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -137,7 +127,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-            child: const Text('重置'),
+            child: const Text('立即换新'),
           ),
         ],
       ),
@@ -173,6 +163,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     final tm = context.watch<TabManager>();
     final tab = tm.active;
     _syncAddressFromTab();
+    final showHome = tab.isBlank && !tab.isLoading;
 
     return Scaffold(
       body: SafeArea(
@@ -191,6 +182,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                   onReload: () => _activeController?.reload(),
                   onStop: () => _activeController?.stopLoading(),
                   onReset: _confirmReset,
+                  onBookmarks: () => _showBookmarksSheet(),
                   onAddTab: () {
                     if (tm.addTab()) {
                       _addressCtrl.clear();
@@ -221,21 +213,30 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                   },
                 ),
                 Expanded(
-                  child: IndexedStack(
-                    index: tm.activeIndex,
+                  child: Stack(
                     children: [
-                      for (final t in tm.tabs)
-                        PrivacyWebView(
-                          key: ValueKey(t.id),
-                          tab: t,
-                          onChanged: () {
-                            if (mounted) {
-                              tm.notifyTabChanged();
-                            }
-                          },
-                          onControllerReady: (c) {
-                            _controllers[t.id] = c;
-                          },
+                      IndexedStack(
+                        index: tm.activeIndex,
+                        children: [
+                          for (final t in tm.tabs)
+                            PrivacyWebView(
+                              key: ValueKey(t.id),
+                              tab: t,
+                              onChanged: () {
+                                if (mounted) {
+                                  tm.notifyTabChanged();
+                                }
+                              },
+                              onControllerReady: (c) {
+                                _controllers[t.id] = c;
+                              },
+                            ),
+                        ],
+                      ),
+                      if (showHome)
+                        _StartHome(
+                          onOpenBookmark: _openBookmark,
+                          sessionHint: SessionIdentity.current.sessionId,
                         ),
                     ],
                   ),
@@ -251,13 +252,160 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                     children: [
                       CircularProgressIndicator(color: Color(0xFF4FC3F7)),
                       SizedBox(height: 16),
-                      Text('正在核清并冷启动…', style: TextStyle(color: Colors.white70)),
+                      Text('正在换新身份…', style: TextStyle(color: Colors.white70)),
                     ],
                   ),
                 ),
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  Future<void> _showBookmarksSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '书签',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              for (final b in kBookmarks)
+                ListTile(
+                  leading: const Icon(Icons.bookmark, color: Color(0xFF4FC3F7)),
+                  title: Text(b.title, style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(
+                    b.url,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openBookmark(b);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StartHome extends StatelessWidget {
+  const _StartHome({
+    required this.onOpenBookmark,
+    required this.sessionHint,
+  });
+
+  final void Function(Bookmark) onOpenBookmark;
+  final String sessionHint;
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: const Color(0xFF0B0B0D),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 28, 20, 20),
+        children: [
+          const Text(
+            '隐私浏览器',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '本次会话 · 全新身份 ${sessionHint.substring(0, 6)}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: Colors.white38, fontSize: 12),
+          ),
+          const SizedBox(height: 28),
+          const Text(
+            '书签',
+            style: TextStyle(color: Colors.white54, fontSize: 13),
+          ),
+          const SizedBox(height: 10),
+          for (final b in kBookmarks)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Material(
+                color: const Color(0xFF1A1A20),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => onOpenBookmark(b),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.bookmark, color: Color(0xFF4FC3F7)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                b.title,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                b.url,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right, color: Colors.white24),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 20),
+          const Text(
+            '每次打开 / 退到后台 / 点重置 = 新身份（等同第一次无痕）。',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white24, fontSize: 12, height: 1.4),
+          ),
+        ],
       ),
     );
   }
@@ -275,6 +423,7 @@ class _TopBar extends StatelessWidget {
     required this.onReload,
     required this.onStop,
     required this.onReset,
+    required this.onBookmarks,
     required this.onAddTab,
   });
 
@@ -288,6 +437,7 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onReload;
   final VoidCallback onStop;
   final VoidCallback onReset;
+  final VoidCallback onBookmarks;
   final VoidCallback onAddTab;
 
   @override
@@ -295,7 +445,7 @@ class _TopBar extends StatelessWidget {
     return Material(
       color: const Color(0xFF141418),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
+        padding: const EdgeInsets.fromLTRB(2, 6, 2, 6),
         child: Row(
           children: [
             IconButton(
@@ -331,7 +481,8 @@ class _TopBar extends StatelessWidget {
                   ],
                   decoration: InputDecoration(
                     hintText: '搜索或输入网址',
-                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                    hintStyle:
+                        const TextStyle(color: Colors.white38, fontSize: 13),
                     filled: true,
                     fillColor: const Color(0xFF222228),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -346,12 +497,17 @@ class _TopBar extends StatelessWidget {
               ),
             ),
             IconButton(
+              tooltip: '书签',
+              onPressed: onBookmarks,
+              icon: const Icon(Icons.bookmarks_outlined, size: 20),
+            ),
+            IconButton(
               tooltip: '新建标签',
               onPressed: canAdd ? onAddTab : null,
               icon: const Icon(Icons.add, size: 22),
             ),
             IconButton(
-              tooltip: '重置浏览器',
+              tooltip: '换新身份',
               onPressed: onReset,
               icon: const Icon(Icons.delete_forever_outlined,
                   color: Colors.redAccent, size: 22),
@@ -392,7 +548,8 @@ class _TabStrip extends StatelessWidget {
               constraints: const BoxConstraints(maxWidth: 140, minWidth: 72),
               padding: const EdgeInsets.only(left: 10, right: 4),
               decoration: BoxDecoration(
-                color: selected ? const Color(0xFF2A2A32) : const Color(0xFF1A1A20),
+                color:
+                    selected ? const Color(0xFF2A2A32) : const Color(0xFF1A1A20),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: selected ? const Color(0xFF4FC3F7) : Colors.white12,

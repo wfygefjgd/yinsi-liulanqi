@@ -12,15 +12,16 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - Bundle ID: `com.yinsi.liulanqi`（与 PHUB Player 不同，可共存）
 - 显示名: 隐私浏览器
-- 版本: 1.0.1 (2)
+- 版本: 1.1.0 (3)
 - 包体: 未签名（适合侧载）
 
 ## 功能
 
+- **每次冷启动 = 新身份**（核清 + 随机 UA/语言 + 无痕 WebView）
+- 进后台 / 点「换新身份」= 杀进程冷启动
 - 地址栏访问网页（默认 DuckDuckGo 搜索）
+- 书签：Jiurelay
 - 最多 3 个标签
-- **重置**：清 Cookie / 缓存 / 沙盒 / Keychain，并冷启动
-- 进后台自动核清
 
 ## 本地构建
 

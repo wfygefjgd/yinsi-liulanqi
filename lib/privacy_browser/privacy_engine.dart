@@ -5,7 +5,9 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Extreme privacy wipe: WebKit/WebView data + sandbox files + prefs + cold exit.
+import 'session_identity.dart';
+
+/// Extreme privacy wipe: WebKit/WebView data + sandbox + prefs + new identity.
 class PrivacyEngine {
   PrivacyEngine._();
 
@@ -22,10 +24,9 @@ class PrivacyEngine {
       try {
         await _channel.invokeMethod<void>('nuclearWipe');
       } on PlatformException {
-        // Native channel optional on unsupported hosts.
       } on MissingPluginException {
-        // ignore
       }
+      SessionIdentity.mint();
       if (exitAfter) {
         await _exitApp();
       }
@@ -34,8 +35,11 @@ class PrivacyEngine {
     }
   }
 
+  /// Every cold start = wipe leftovers + mint fresh session identity.
   static Future<void> wipeOnLaunch() async {
+    SessionIdentity.mint();
     await nuclearWipe(exitAfter: false);
+    SessionIdentity.mint();
   }
 
   static Future<void> resetAndRelaunch() async {
@@ -48,6 +52,10 @@ class PrivacyEngine {
     } catch (_) {}
     try {
       await InAppWebViewController.clearAllCache();
+    } catch (_) {}
+    try {
+      final store = WebStorageManager.instance();
+      await store.deleteAllData();
     } catch (_) {}
   }
 

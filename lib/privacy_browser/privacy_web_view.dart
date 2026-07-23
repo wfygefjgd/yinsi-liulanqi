@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'browser_tab_model.dart';
+import 'session_identity.dart';
 
 typedef TabChanged = void Function();
 
@@ -25,28 +26,46 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     with AutomaticKeepAliveClientMixin {
   InAppWebViewController? _controller;
 
-  static final InAppWebViewSettings _settings = InAppWebViewSettings(
-    incognito: true,
-    javaScriptEnabled: true,
-    domStorageEnabled: true,
-    databaseEnabled: false,
-    cacheEnabled: false,
-    thirdPartyCookiesEnabled: false,
-    mediaPlaybackRequiresUserGesture: true,
-    allowsInlineMediaPlayback: true,
-    allowsBackForwardNavigationGestures: true,
-    supportZoom: true,
-    builtInZoomControls: true,
-    displayZoomControls: false,
-    useWideViewPort: true,
-    loadWithOverviewMode: true,
-    transparentBackground: false,
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-  );
+  InAppWebViewSettings get _settings {
+    final id = SessionIdentity.current;
+    return InAppWebViewSettings(
+      incognito: true,
+      javaScriptEnabled: true,
+      domStorageEnabled: true,
+      databaseEnabled: false,
+      cacheEnabled: false,
+      clearCache: true,
+      clearSessionCache: true,
+      thirdPartyCookiesEnabled: false,
+      mediaPlaybackRequiresUserGesture: true,
+      allowsInlineMediaPlayback: true,
+      allowsBackForwardNavigationGestures: true,
+      supportZoom: true,
+      builtInZoomControls: true,
+      displayZoomControls: false,
+      useWideViewPort: true,
+      loadWithOverviewMode: true,
+      transparentBackground: false,
+      allowsLinkPreview: false,
+      isFraudulentWebsiteWarningEnabled: false,
+      sharedCookiesEnabled: false,
+      limitsNavigationsToAppBoundDomains: false,
+      userAgent: id.userAgent,
+      // Reduce storage surface.
+      saveFormData: false,
+    );
+  }
 
   @override
   bool get wantKeepAlive => true;
+
+  Future<void> _injectPrivacy(InAppWebViewController controller) async {
+    try {
+      await controller.evaluateJavascript(
+        source: SessionIdentity.current.injectScript,
+      );
+    } catch (_) {}
+  }
 
   Future<void> _syncNav() async {
     final c = _controller;
@@ -83,6 +102,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         widget.onChanged();
       },
       onLoadStop: (controller, url) async {
+        await _injectPrivacy(controller);
         widget.tab.isLoading = false;
         widget.tab.progress = 100;
         final s = url?.toString() ?? '';
