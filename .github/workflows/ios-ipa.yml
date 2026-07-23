@@ -24,7 +24,36 @@ jobs:
         run: flutter pub get
 
       - name: Build iOS release (device, no codesign)
-        run: flutter build ios --release --no-codesign
+        run: |
+          set -euo pipefail
+          # Generate Xcode config without Flutter team-id check failing CI
+          flutter build ios --release --no-codesign --config-only
+          cd ios
+          xcodebuild \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM= \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+          # Normalize output path for packaging step
+          APP_SRC="$(ls -d ../build/ios/iphoneos/Runner.app 2>/dev/null || true)"
+          if [ -z "$APP_SRC" ]; then
+            APP_SRC="$(ls -d ../build/ios/Release-iphoneos/Runner.app 2>/dev/null || true)"
+          fi
+          if [ -z "$APP_SRC" ]; then
+            APP_SRC="$(find ../build/ios -type d -name 'Runner.app' | head -n 1 || true)"
+          fi
+          test -n "$APP_SRC"
+          mkdir -p ../build/ios/iphoneos
+          rm -rf ../build/ios/iphoneos/Runner.app
+          /usr/bin/ditto "$APP_SRC" ../build/ios/iphoneos/Runner.app
+          echo "APP=$APP_SRC -> build/ios/iphoneos/Runner.app"
 
       - name: Package sideload IPA (unsigned)
         run: |
