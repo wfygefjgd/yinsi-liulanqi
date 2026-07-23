@@ -169,21 +169,22 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.7.0
-          name: 隐私浏览器 iOS v1.7.0
+          tag_name: v1.7.1
+          name: 隐私浏览器 iOS v1.7.1
           body: |
-            ## 隐私浏览器 iOS v1.7.0
+            ## 隐私浏览器 iOS v1.7.1
 
-            ### 版本 · **1.7.0** (22) · `com.tongyong.browser`
+            ### 版本 · **1.7.1** (23) · `com.tongyong.browser`
 
-            ### 新功能
-            - **长按链接** → 底部弹窗打开网页（跨站可看，不污染主标签锁定）
-            - **EasyList 真规则源**：EasyList + EasyList China + EasyPrivacy
-              - 约 **每 3 天自动更新**
-              - ≡ 菜单 **「更新广告规则」** 手动更新
-            - 跨站：本站自由；其它站主框架拦截；广告域名硬拦
-            - 拼接：优先章内分页再下一章
-            - 点选去广告可保存 + 长按撤销
+            ### 本版（硬改吐槽点）
+            - **全局拼接**：≡ 打开后，**任意网页**滑到底自动拼下一页（先 1·2·3/下一页，再下一章）
+            - 阅读器同样页优先于章
+            - **赌博/垃圾弹窗**：外链关键词加强 + 死 window.open
+            - EasyList 仍可 ≡「更新广告规则」
+            - 长按链接弹窗打开外站
+
+            ### 说明
+            东方永夜鸡是油猴脚本，无法整包当插件装进 WebView；全局拼接按同域 fetch 追加实现。
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

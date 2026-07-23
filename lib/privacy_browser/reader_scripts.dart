@@ -62,7 +62,7 @@ class ReaderScripts {
       if (a.target === '_blank') a.target = '_self';
       var href = a.href || '';
       if (!href || href.indexOf('javascript:')===0) return;
-      if (/doubleclick|googlesyndication|pagead|adservice|exoclick|popads|juicyads|gdt\.qq|lianmeng|pos\.baidu|hilltopads|adsterra|propeller|clickadu|trafficjunky/i.test(href)) {
+      if (/doubleclick|googlesyndication|pagead|adservice|exoclick|popads|juicyads|gdt\.qq|lianmeng|pos\.baidu|hilltopads|adsterra|propeller|clickadu|trafficjunky|casino|bet365|1xbet|gambling|博彩|赌博|澳门|威尼斯人|太阳城|棋牌|彩票|sporttery|bbin|开元|皇冠/i.test(href)) {
         ev.preventDefault(); ev.stopPropagation(); return false;
       }
       try {
@@ -75,7 +75,7 @@ class ReaderScripts {
     } catch(e){}
   }, true);
 
-  var AD_RE = /doubleclick|googlesyndication|googleadservices|googletagmanager|pagead|adservice|adnxs|adsrvr|taboola|outbrain|criteo|scorecardresearch|cnzz|umeng|baidu\.com\/cpro|pos\.baidu|hm\.baidu|tanx\.com|popads|popcash|propeller|exoclick|juicyads|trafficjunky|adsterra|hilltopads|media\.net|moatads|hotjar|clarity\.ms|facebook\.net|analytics|prebid|adsbygoogle|adframe|adserver|partner\.googleadservices|gdt\.qq|lianmeng|mediav|union\.uc|pangolin|pglstatp|bytead|toutiao|snssdk|adkwai|adsystem|securepubads|googletagservices|fundingchoices|cookiebot|onesignal/i;
+  var AD_RE = /doubleclick|googlesyndication|googleadservices|googletagmanager|pagead|adservice|adnxs|adsrvr|taboola|outbrain|criteo|scorecardresearch|cnzz|umeng|baidu\.com\/cpro|pos\.baidu|hm\.baidu|tanx\.com|popads|popcash|propeller|exoclick|juicyads|trafficjunky|adsterra|hilltopads|media\.net|moatads|hotjar|clarity\.ms|facebook\.net|analytics|prebid|adsbygoogle|adframe|adserver|partner\.googleadservices|gdt\.qq|lianmeng|mediav|union\.uc|pangolin|pglstatp|bytead|toutiao|snssdk|adkwai|adsystem|securepubads|googletagservices|fundingchoices|cookiebot|onesignal|gambling|casino|bet365|1xbet|sporttery|lottery|澳门|博彩|赌博|威尼斯人|太阳城|优惠.*充值|免费彩金|ag\.|bbin|im体育|皇冠体育|开元棋牌|皇冠|bet\./i;
 
   function killNode(el){
     try {
@@ -529,6 +529,206 @@ class ReaderScripts {
   document.addEventListener('touchmove', move, true);
   document.addEventListener('click', click, true);
   return 'on';
+})();
+''';
+
+  /// Global in-page autopager (Yongyeji-style idea): append next same-site pages.
+  /// Prefers numbered 1,2,3… then 下一页; only then 下一章.
+  static const globalAutoPager = r'''
+(function(){
+  if (window.__pbAutoPager) return;
+  window.__pbAutoPager = true;
+  if (window.__pbPickerOn) return;
+
+  var MAX = 40;
+  var busy = false;
+  var count = 0;
+  var seen = {};
+  seen[location.href.split('#')[0]] = 1;
+
+  function textOf(el){
+    return (el && (el.innerText||el.textContent)||'').replace(/\s+/g,' ').trim();
+  }
+  function isJs(h){
+    return !h || h.indexOf('javascript:')===0 || h==='#' || h.indexOf('void')>=0;
+  }
+  function sameHost(u){
+    try {
+      var a = new URL(u, location.href);
+      var b = location.hostname.replace(/^www\./,'');
+      var h = a.hostname.replace(/^www\./,'');
+      return h===b || h.endsWith('.'+b) || b.endsWith('.'+h);
+    } catch(e){ return false; }
+  }
+  function findNext(doc){
+    doc = doc || document;
+    var links = Array.prototype.slice.call(doc.querySelectorAll('a[href]'));
+    var pageNums = [], seenN = {}, cur = 0;
+    links.forEach(function(a){
+      var tx = textOf(a).replace(/\s+/g,'');
+      if (!/^\d{1,3}$/.test(tx) || isJs(a.href)) return;
+      if (!sameHost(a.href)) return;
+      var n = parseInt(tx,10);
+      if (seenN[n]) return;
+      seenN[n]=1;
+      pageNums.push({n:n, href:a.href, el:a});
+    });
+    pageNums.sort(function(a,b){return a.n-b.n;});
+    if (pageNums.length>=2){
+      pageNums.forEach(function(p){
+        try{
+          var cls=((p.el.className||'')+' '+(p.el.parentElement&&p.el.parentElement.className||'')).toLowerCase();
+          if (/active|current|on|select|this|cur/.test(cls)||p.el.getAttribute('aria-current')) cur=p.n;
+          var st=getComputedStyle(p.el);
+          if (parseInt(st.fontWeight,10)>=600||st.fontWeight==='bold') cur=p.n;
+        }catch(e){}
+      });
+      try{
+        var u0=new URL(location.href);
+        ['page','p','Page','P','pageid','index','pg'].forEach(function(k){
+          if(u0.searchParams.has(k)){var nn=parseInt(u0.searchParams.get(k),10); if(!isNaN(nn)&&nn>0) cur=nn;}
+        });
+        var mPath=location.pathname.match(/_(\d+)(\.\w+)?$/);
+        if(mPath){var pn=parseInt(mPath[1],10); if(!isNaN(pn)&&pn<80) cur=pn;}
+      }catch(e){}
+      if(!cur){
+        pageNums.forEach(function(p){
+          try{ if(p.href.split('#')[0]===location.href.split('#')[0]) cur=p.n; }catch(e){}
+        });
+      }
+      if(!cur) cur=pageNums[0].n;
+      for(var i=0;i<pageNums.length;i++){
+        if(pageNums[i].n===cur+1) return {href:pageNums[i].href, kind:'page'};
+      }
+    }
+    for(var j=0;j<links.length;j++){
+      var a=links[j], tx=textOf(a);
+      if(isJs(a.href)||!sameHost(a.href)) continue;
+      if(/下一页|下页|next\s*page/i.test(tx) && !/章|节|回/.test(tx)) return {href:a.href, kind:'page'};
+    }
+    try{
+      var u=new URL(location.href);
+      var keys=['page','p','Page','P','pageid','pg'];
+      for(var k=0;k<keys.length;k++){
+        if(u.searchParams.has(keys[k])){
+          var n=parseInt(u.searchParams.get(keys[k]),10);
+          if(!isNaN(n)){ u.searchParams.set(keys[k], String(n+1)); return {href:u.toString(), kind:'page'}; }
+        }
+      }
+      var m=location.pathname.match(/^(.*_)(\d+)(\.\w+)?$/);
+      if(m){
+        var num=parseInt(m[2],10);
+        if(!isNaN(num)&&num<80){
+          return {href:location.origin+m[1]+(num+1)+(m[3]||'')+location.search, kind:'page'};
+        }
+      }
+    }catch(e){}
+    // only after pages exhausted
+    for(var t=0;t<links.length;t++){
+      var a2=links[t], tx2=textOf(a2);
+      if(isJs(a2.href)||!sameHost(a2.href)) continue;
+      if(/下一[章节回]|下[一]?章|next\s*chapter/i.test(tx2)) return {href:a2.href, kind:'chapter'};
+    }
+    return null;
+  }
+
+  function contentRoot(doc){
+    doc=doc||document;
+    var sels=['#content','#Content','.content','.Content','#chaptercontent','.chapter-content','#BookText','#nr','#nr1','article','main','.read-content','.novelcontent'];
+    var best=null, bestL=0;
+    sels.forEach(function(s){
+      doc.querySelectorAll(s).forEach(function(el){
+        var L=(el.innerText||'').length;
+        if(L>bestL){bestL=L; best=el;}
+      });
+    });
+    return best || doc.body;
+  }
+
+  function appendFromHtml(html, href){
+    try{
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      var src = contentRoot(doc);
+      if(!src) return false;
+      var box = contentRoot(document);
+      if(!box) return false;
+      var wrap = document.createElement('div');
+      wrap.setAttribute('data-pb-stitched','1');
+      wrap.style.cssText='border-top:2px dashed #888;margin:24px 0 8px;padding-top:16px;';
+      var lab = document.createElement('div');
+      lab.textContent='—— 已拼接 '+(count+1)+' · '+href;
+      lab.style.cssText='font-size:12px;color:#888;margin-bottom:12px;';
+      wrap.appendChild(lab);
+      var clone = src.cloneNode(true);
+      clone.querySelectorAll('script,iframe,ins,nav,footer,header').forEach(function(n){try{n.remove();}catch(e){}});
+      wrap.appendChild(clone);
+      box.appendChild(wrap);
+      return true;
+    }catch(e){ return false; }
+  }
+
+  function loadNext(){
+    if(busy || count>=MAX) return;
+    var n = findNext(document);
+    // if last stitched changed URL context, still search in last append? use document
+    if(!n || !n.href) return;
+    var href = n.href.split('#')[0];
+    if(seen[href]) {
+      // try chapter only if page loop
+      if(n.kind==='page') return;
+      return;
+    }
+    seen[href]=1;
+    busy=true;
+    fetch(href, {credentials:'include', headers:{'Accept':'text/html'}}).then(function(r){
+      return r.text();
+    }).then(function(html){
+      if(appendFromHtml(html, href)){
+        count++;
+        // rewrite location-like next finder: inject base for relative links in appended? skip
+        try{
+          // update a fake marker of current page for next findNext via history? 
+          // better: temporarily set data attribute with last href for param logic
+          document.documentElement.setAttribute('data-pb-last', href);
+        }catch(e){}
+      }
+      busy=false;
+    }).catch(function(){ busy=false; });
+  }
+
+  // improve findNext using last stitched URL for page numbers
+  var _findNext = findNext;
+  findNext = function(doc){
+    var last = document.documentElement.getAttribute('data-pb-last');
+    if(last){
+      try{
+        // create temporary base for URL compare - use history state string only for param
+        var saved = location.href;
+        // can't change location; parse page from last
+        var fakeDoc = doc;
+        var n = _findNext(fakeDoc);
+        if(n) return n;
+      }catch(e){}
+    }
+    return _findNext(doc);
+  };
+
+  window.addEventListener('scroll', function(){
+    if(busy) return;
+    var st = window.pageYOffset || document.documentElement.scrollTop || 0;
+    var h = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    var vh = window.innerHeight || 800;
+    if(st + vh > h - 900) loadNext();
+  }, {passive:true});
+
+  // tip once
+  try{
+    var tip=document.createElement('div');
+    tip.textContent='全局拼接已开 · 滑到底自动加载下一页';
+    tip.style.cssText='position:fixed;left:50%;bottom:72px;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;padding:6px 12px;border-radius:16px;font-size:12px;z-index:2147483000;pointer-events:none;';
+    document.documentElement.appendChild(tip);
+    setTimeout(function(){ try{tip.remove();}catch(e){} }, 2500);
+  }catch(e){}
 })();
 ''';
 }

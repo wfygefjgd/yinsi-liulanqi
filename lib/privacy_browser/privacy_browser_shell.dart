@@ -459,12 +459,14 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                       children: [
                         for (final t in tm.tabs)
                           PrivacyWebView(
-                            key: ValueKey('${t.id}_d$_desktopMode'),
+                            key: ValueKey(
+                                '${t.id}_d${_desktopMode}_s$_stitchEnabled'),
                             tab: t,
                             desktopMode: _desktopMode,
                             popupBlock: _popupBlock,
                             adBlock: _adBlock,
                             crossSiteBlock: _crossSiteBlock,
+                            globalStitch: _stitchEnabled,
                             onUserHide: _onUserHide,
                             onLongPressLink: _openLinkPopup,
                             onChanged: () {
@@ -708,9 +710,9 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                     ),
                   ),
                   SwitchListTile.adaptive(
-                    title: const Text('拼接', style: TextStyle(color: _C.text)),
+                    title: const Text('全局拼接', style: TextStyle(color: _C.text)),
                     subtitle: const Text(
-                      '全局：阅读模式自动拼下一章',
+                      '所有网页滑到底自动拼下一页（先1·2·3再下一章）；阅读模式同步',
                       style: TextStyle(color: _C.secondary, fontSize: 12),
                     ),
                     value: _stitchEnabled,

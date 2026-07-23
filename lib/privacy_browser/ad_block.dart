@@ -124,7 +124,9 @@ class AdBlock {
   static final _junkLanding = RegExp(
     r'(popunder|popads|clickadu|exoclick|juicyads|hilltopads|adsterra|'
     r'go\.php\?|redirect\.php|out\.php|jump\.php|clk\.|click\?|'
-    r'utm_source=ads|zoneid=|ad_id=|bannerid=)',
+    r'utm_source=ads|zoneid=|ad_id=|bannerid=|'
+    r'casino|bet365|1xbet|gambling|macau|vegas|博彩|赌博|澳门|威尼斯人|太阳城|'
+    r'棋牌|彩票|sporttery|im体育|bbin|ag真人|开元|皇冠)',
     caseSensitive: false,
   );
 

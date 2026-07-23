@@ -23,6 +23,7 @@ class PrivacyWebView extends StatefulWidget {
     /// true = page may only navigate within same site root; other hosts blocked.
     this.crossSiteBlock = true,
     this.desktopMode = false,
+    this.globalStitch = false,
     this.onUserHide,
     this.onLongPressLink,
   });
@@ -34,6 +35,8 @@ class PrivacyWebView extends StatefulWidget {
   final bool adBlock;
   final bool crossSiteBlock;
   final bool desktopMode;
+  /// Yongyeji-style autopager on normal pages (not only reader).
+  final bool globalStitch;
   final void Function(String selector, String pageUrl)? onUserHide;
   /// Long-press link → open in in-app popup sheet.
   final void Function(String url, String title)? onLongPressLink;
@@ -105,6 +108,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.desktopMode != widget.desktopMode) {
       _applyDesktop();
+    } else if (oldWidget.globalStitch != widget.globalStitch &&
+        widget.globalStitch &&
+        _controller != null) {
+      _controller!.evaluateJavascript(source: ReaderScripts.globalAutoPager);
     }
   }
 
@@ -157,6 +164,14 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     try {
       await controller.evaluateJavascript(source: ReaderScripts.longPressOpen);
     } catch (_) {}
+    // Global autopager when stitch toggle ON (all sites, same-origin pages)
+    if (widget.globalStitch) {
+      try {
+        await controller.evaluateJavascript(
+          source: ReaderScripts.globalAutoPager,
+        );
+      } catch (_) {}
+    }
     try {
       final url = widget.tab.url;
       final sels = await HideStore.selectorsForUrl(url);
