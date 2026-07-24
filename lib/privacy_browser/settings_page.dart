@@ -11,7 +11,6 @@ class SettingsColors {
   static const secondary = Color(0xFF8E8E93);
 }
 
-
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -58,12 +57,13 @@ class _SettingsPageState extends State<SettingsPage> {
           ? Center(child: CircularProgressIndicator(color: SettingsColors.accent))
           : ListView(
               children: [
-                _SectionHeader(title: '隐私'),
+                const _SectionHeader(title: '隐私'),
                 _SwitchTile(
                   icon: Icons.shield_outlined,
                   title: '退到后台时自动清理',
-                  subtitle:
-                      _autoWipe ? '离开浏览器时自动清除所有数据并冷启�? : '关闭后表现为正常浏览器，保留数据',
+                  subtitle: _autoWipe
+                      ? '离开浏览器时自动清除所有数据并冷启动'
+                      : '关闭后表现为正常浏览器，保留数据',
                   value: _autoWipe,
                   onChanged: _toggle,
                 ),
