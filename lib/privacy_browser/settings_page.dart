@@ -1,7 +1,16 @@
 import 'package:flutter/material.dart';
 
 import 'privacy_engine.dart';
-import 'privacy_browser_shell.dart' show _S;
+
+/// Shared dark palette (mirrors _S in privacy_browser_shell.dart).
+class SettingsColors {
+  static const bg = Color(0xFF000000);
+  static const bar = Color(0xF01C1C1E);
+  static const accent = Color(0xFF0A84FF);
+  static const text = Color(0xFFFFFFFF);
+  static const secondary = Color(0xFF8E8E93);
+}
+
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -39,14 +48,14 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _S.bg,
+      backgroundColor: SettingsColors.bg,
       appBar: AppBar(
-        backgroundColor: _S.bar,
-        foregroundColor: _S.text,
+        backgroundColor: SettingsColors.bar,
+        foregroundColor: SettingsColors.text,
         title: const Text('设置'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: _S.accent))
+          ? Center(child: CircularProgressIndicator(color: SettingsColors.accent))
           : ListView(
               children: [
                 _SectionHeader(title: '隐私'),
@@ -54,7 +63,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.shield_outlined,
                   title: '退到后台时自动清理',
                   subtitle:
-                      _autoWipe ? '离开浏览器时自动清除所有数据并冷启动' : '关闭后表现为正常浏览器，保留数据',
+                      _autoWipe ? '离开浏览器时自动清除所有数据并冷启�? : '关闭后表现为正常浏览器，保留数据',
                   value: _autoWipe,
                   onChanged: _toggle,
                 ),
@@ -81,7 +90,7 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         title,
         style: const TextStyle(
-          color: _S.secondary,
+          color: SettingsColors.secondary,
           fontSize: 13,
           fontWeight: FontWeight.w600,
         ),
@@ -108,19 +117,19 @@ class _SwitchTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: _S.accent),
-      title: Text(title, style: const TextStyle(color: _S.text, fontSize: 16)),
+      leading: Icon(icon, color: SettingsColors.accent),
+      title: Text(title, style: const TextStyle(color: SettingsColors.text, fontSize: 16)),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           subtitle,
-          style: const TextStyle(color: _S.secondary, fontSize: 13),
+          style: const TextStyle(color: SettingsColors.secondary, fontSize: 13),
         ),
       ),
       trailing: Switch(
         value: value,
         onChanged: onChanged,
-        activeColor: _S.accent,
+        activeColor: SettingsColors.accent,
       ),
     );
   }
@@ -140,13 +149,13 @@ class _InfoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: Icon(icon, color: _S.accent),
-      title: Text(title, style: const TextStyle(color: _S.text, fontSize: 16)),
+      leading: Icon(icon, color: SettingsColors.accent),
+      title: Text(title, style: const TextStyle(color: SettingsColors.text, fontSize: 16)),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           subtitle,
-          style: const TextStyle(color: _S.secondary, fontSize: 13),
+          style: const TextStyle(color: SettingsColors.secondary, fontSize: 13),
         ),
       ),
     );
