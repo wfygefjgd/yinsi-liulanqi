@@ -145,22 +145,22 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.8
-          name: 隐私浏览器 iOS v1.0.8
+          tag_name: v1.0.9
+          name: 隐私浏览器 iOS v1.0.9
           body: |
-            ## 隐私浏览器 · 核清更彻底
+            ## 隐私浏览器 · 回归 classic 纯净
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.8 · **Build**: 33
+            - **Version**: 1.0.9 · **Build**: 34
 
-            ### 修复（站点认成同一环境）
-            - 进后台：**彻底清 WebKit 数据 + 杀进程**（与最初版一致的冷启动）
-            - 原生双遍清理 Cookie/LocalStorage/缓存/Keychain
-            - 冷启动再清一遍残留
-            - 保留 window.open 方案二（弹窗不占原页）
-            - 仅保留 durable 内置书签目录
+            ### 变更（针对「环境变化过于频繁」）
+            - 进后台：只清数据 + 关标签，**不杀进程**（classic）
+            - 弹窗 WebView 与主页同等无痕（incognito / 无缓存 / 无第三方 Cookie）
+            - 去掉 durable 保留；原生全量删目录
+            - window.open polyfill 仅注入一次，去掉反复 re-inject
+            - 媒体自动播放策略回到 classic（需手势）
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

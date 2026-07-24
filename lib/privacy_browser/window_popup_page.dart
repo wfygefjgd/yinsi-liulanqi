@@ -3,7 +3,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'popup_registry.dart';
 
-/// Overlay popup for window.open — does NOT replace the underlying browser route.
+/// Overlay popup for window.open — same privacy settings as main WebView.
 class WindowPopupOverlay {
   WindowPopupOverlay._();
 
@@ -16,7 +16,6 @@ class WindowPopupOverlay {
     required int windowId,
     VoidCallback? onClosed,
   }) {
-    // One popup at a time for simplicity
     hide(notify: false);
 
     late OverlayEntry entry;
@@ -73,20 +72,39 @@ class _PopupChromeState extends State<_PopupChrome> {
   String _url = '';
   bool _closed = false;
 
+  /// Identical privacy profile to main PrivacyWebView.
+  static final InAppWebViewSettings _privacySettings = InAppWebViewSettings(
+    incognito: true,
+    javaScriptEnabled: true,
+    domStorageEnabled: true,
+    databaseEnabled: false,
+    cacheEnabled: false,
+    clearCache: true,
+    thirdPartyCookiesEnabled: false,
+    mediaPlaybackRequiresUserGesture: true,
+    allowsInlineMediaPlayback: true,
+    supportZoom: true,
+    builtInZoomControls: true,
+    displayZoomControls: false,
+    useWideViewPort: true,
+    loadWithOverviewMode: true,
+    transparentBackground: false,
+    javaScriptCanOpenWindowsAutomatically: false,
+    supportMultipleWindows: false,
+    useShouldOverrideUrlLoading: true,
+    sharedCookiesEnabled: false,
+    userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+  );
+
   static const _blankHtml = '''
 <!DOCTYPE html><html><head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>正在打开…</title>
+<title></title>
 <style>
-  body{margin:0;padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
-  background:#f5f5f7;color:#1d1d1f;text-align:center;}
-  .c{margin-top:40vh;transform:translateY(-50%);}
-  p{font-size:15px;color:#6e6e73;line-height:1.5;}
-</style></head><body><div class="c">
-<p>请稍候…</p>
-<p style="font-size:13px;">正在确认并打开页面</p>
-</div></body></html>
+  body{margin:0;background:#000;}
+</style></head><body></body></html>
 ''';
 
   @override
@@ -145,13 +163,11 @@ class _PopupChromeState extends State<_PopupChrome> {
       color: Colors.black.withOpacity(0.45),
       child: Stack(
         children: [
-          // Tap dim area does NOT close (site may need popup open)
           Positioned.fill(
             child: IgnorePointer(
               child: Container(color: Colors.transparent),
             ),
           ),
-          // Sheet from top — looks like a browser popup, main page stays underneath
           Positioned(
             left: 0,
             right: 0,
@@ -221,7 +237,6 @@ class _PopupChromeState extends State<_PopupChrome> {
                     ),
                   Expanded(
                     child: InAppWebView(
-                      // Prefer HTML data for blank so user sees content, not empty black
                       initialData: (widget.initialUrl.isEmpty ||
                               widget.initialUrl == 'about:blank')
                           ? InAppWebViewInitialData(
@@ -235,16 +250,7 @@ class _PopupChromeState extends State<_PopupChrome> {
                               widget.initialUrl == 'about:blank')
                           ? null
                           : URLRequest(url: WebUri(widget.initialUrl)),
-                      initialSettings: InAppWebViewSettings(
-                        javaScriptEnabled: true,
-                        domStorageEnabled: true,
-                        javaScriptCanOpenWindowsAutomatically: false,
-                        supportMultipleWindows: false,
-                        useShouldOverrideUrlLoading: true,
-                        transparentBackground: false,
-                        userAgent:
-                            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                      ),
+                      initialSettings: _privacySettings,
                       onWebViewCreated: (c) {
                         _controller = c;
                       },

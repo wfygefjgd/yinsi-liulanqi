@@ -108,20 +108,20 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   }
 
   Future<void> _silentBackgroundWipe() async {
-    // Destroy WebViews first so they release storage handles
+    // Classic: destroy WebViews + wipe site data, do NOT kill process
+    // (kill-on-background caused "environment changed too often" on sites)
+    WindowPopupOverlay.hide(notify: false);
     _controllers.clear();
-    if (mounted) {
-      try {
-        context.read<TabManager>().hardResetTabs();
-      } catch (_) {}
-      _addressCtrl.clear();
-    }
-    // Thorough wipe + kill process (same cold identity as oldest build)
     await PrivacyEngine.wipeOnBackground();
+    if (!mounted) return;
+    try {
+      context.read<TabManager>().hardResetTabs();
+    } catch (_) {}
+    _addressCtrl.clear();
+    if (mounted) setState(() => _showTabs = false);
   }
 
   void _rebuildAfterWipe() {
-    // Process usually already exited; if still alive, empty UI
     if (!mounted) return;
     setState(() {});
     final tab = context.read<TabManager>().active;
@@ -238,7 +238,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: const Text('清除浏览数据', style: TextStyle(color: _S.text)),
         content: const Text(
-          '清除全部网站数据、缓存与 Cookie，并冷启动。内置书签不会删除。',
+          '清除全部网站数据、缓存与 Cookie，并冷启动。',
           style: TextStyle(color: _S.secondary),
         ),
         actions: [

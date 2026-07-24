@@ -11,7 +11,6 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val channelName = "privacy_browser/engine"
-    private val durableName = "durable"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -23,6 +22,7 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     }
                     "exitApp" -> {
+                        // Only used by manual clear
                         result.success(null)
                         window.decorView.postDelayed({
                             finishAndRemoveTask()
@@ -56,18 +56,18 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        deleteRecursivelyPreserve(cacheDir, null)
-        deleteRecursivelyPreserve(codeCacheDir, null)
-        deleteRecursivelyPreserve(externalCacheDir, null)
-        deleteRecursivelyPreserve(filesDir, durableName)
-        deleteRecursivelyPreserve(getDir("webview", MODE_PRIVATE), null)
-        deleteRecursivelyPreserve(getDir("app_webview", MODE_PRIVATE), null)
-        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "app_webview"), null)
-        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "app_flutter"), durableName)
-        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "cache"), null)
-        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "code_cache"), null)
-        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "databases"), null)
-        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "no_backup"), null)
+        deleteRecursively(cacheDir)
+        deleteRecursively(codeCacheDir)
+        deleteRecursively(externalCacheDir)
+        deleteRecursively(filesDir)
+        deleteRecursively(getDir("webview", MODE_PRIVATE))
+        deleteRecursively(getDir("app_webview", MODE_PRIVATE))
+        deleteRecursively(File(applicationInfo.dataDir, "app_webview"))
+        deleteRecursively(File(applicationInfo.dataDir, "app_flutter"))
+        deleteRecursively(File(applicationInfo.dataDir, "cache"))
+        deleteRecursively(File(applicationInfo.dataDir, "code_cache"))
+        deleteRecursively(File(applicationInfo.dataDir, "databases"))
+        deleteRecursively(File(applicationInfo.dataDir, "no_backup"))
 
         getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
             .edit()
@@ -78,31 +78,11 @@ class MainActivity : FlutterActivity() {
         databaseList()?.forEach { deleteDatabase(it) }
     }
 
-    private fun deleteRecursivelyPreserve(file: File?, preserveChildName: String?) {
+    private fun deleteRecursively(file: File?) {
         if (file == null || !file.exists()) return
         if (file.isDirectory) {
-            file.listFiles()?.forEach { child ->
-                if (preserveChildName != null && child.name == preserveChildName) {
-                    return@forEach
-                }
-                if (preserveChildName != null && child.isDirectory) {
-                    val durable = File(child, preserveChildName)
-                    if (durable.exists()) {
-                        child.listFiles()?.forEach { grand ->
-                            if (grand.name != preserveChildName) {
-                                deleteRecursivelyPreserve(grand, null)
-                            }
-                        }
-                        return@forEach
-                    }
-                }
-                deleteRecursivelyPreserve(child, null)
-            }
-            if (preserveChildName == null) {
-                file.delete()
-            }
-        } else {
-            file.delete()
+            file.listFiles()?.forEach { deleteRecursively(it) }
         }
+        file.delete()
     }
 }

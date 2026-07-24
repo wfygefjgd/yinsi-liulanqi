@@ -34,16 +34,16 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
   InAppWebViewController? _controller;
   int _windowSeq = 0;
 
-  /// Main tab: multi-window so window.open is delivered to onCreateWindow,
-  /// but we cancel loading into this view and open overlay instead.
+  /// Match classic pure settings + multi-window only for site window.open.
   static final InAppWebViewSettings _settings = InAppWebViewSettings(
     incognito: true,
     javaScriptEnabled: true,
     domStorageEnabled: true,
     databaseEnabled: false,
     cacheEnabled: false,
+    clearCache: true,
     thirdPartyCookiesEnabled: false,
-    mediaPlaybackRequiresUserGesture: false,
+    mediaPlaybackRequiresUserGesture: true,
     allowsInlineMediaPlayback: true,
     allowsBackForwardNavigationGestures: true,
     supportZoom: true,
@@ -55,15 +55,16 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     javaScriptCanOpenWindowsAutomatically: true,
     supportMultipleWindows: true,
     useShouldOverrideUrlLoading: true,
+    sharedCookiesEnabled: false,
     userAgent:
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
   );
 
-  /// Scheme 2 polyfill: blank + location.replace → same popup only.
+  /// Minimal window.open bridge (inject once). No repeated re-inject / noise.
   static const _windowOpenPolyfill = r'''
 (function(){
-  if (window.__pbWinOpenV5) return;
-  window.__pbWinOpenV5 = true;
+  if (window.__pbWinOpenV6) return;
+  window.__pbWinOpenV6 = true;
   window.__pbPopups = window.__pbPopups || {};
 
   function absUrl(u) {
@@ -93,11 +94,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     try {
       var s = window.__pbPopups[id];
       if (s) s.closed = true;
-      try { window.focus(); } catch(e){}
-      try {
-        window.dispatchEvent(new Event('focus'));
-        document.dispatchEvent(new Event('visibilitychange'));
-      } catch(e){}
     } catch(e){}
   };
 
@@ -115,48 +111,27 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     return loc;
   }
 
-  function makeDocument() {
-    var _tc = '', _ih = '', _title = '';
-    var body = { style: {} };
-    Object.defineProperty(body, 'textContent', {
-      configurable: true,
-      get: function(){ return _tc; },
-      set: function(v){ _tc = String(v == null ? '' : v); }
-    });
-    Object.defineProperty(body, 'innerHTML', {
-      configurable: true,
-      get: function(){ return _ih; },
-      set: function(v){ _ih = String(v == null ? '' : v); }
-    });
-    var doc = {
-      readyState: 'complete',
-      body: body,
-      documentElement: { style: {} },
-      getElementById: function(){ return null; },
-      querySelector: function(){ return null; },
-      querySelectorAll: function(){ return []; },
-      createElement: function(){
-        return { style: {}, appendChild: function(){}, setAttribute: function(){}, textContent: '', innerHTML: '' };
-      },
-      write: function(){},
-      open: function(){},
-      close: function(){}
-    };
-    Object.defineProperty(doc, 'title', {
-      configurable: true,
-      get: function(){ return _title; },
-      set: function(v){ _title = String(v || ''); }
-    });
-    return doc;
-  }
-
   function makeStub(id, url) {
     var stub = {
       closed: false,
       name: '',
       opener: null,
       location: makeLocation(id, url || 'about:blank'),
-      document: makeDocument(),
+      document: {
+        readyState: 'complete',
+        body: { style: {}, textContent: '', innerHTML: '' },
+        documentElement: { style: {} },
+        getElementById: function(){ return null; },
+        querySelector: function(){ return null; },
+        querySelectorAll: function(){ return []; },
+        createElement: function(){
+          return { style: {}, appendChild: function(){}, setAttribute: function(){}, textContent: '', innerHTML: '' };
+        },
+        write: function(){},
+        open: function(){},
+        close: function(){},
+        title: ''
+      },
       focus: function(){},
       blur: function(){},
       postMessage: function(){},
@@ -179,10 +154,8 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       if (u.indexOf('javascript:') === 0) return null;
       u = absUrl(u);
       if (!u) return null;
-
       var id = (Date.now() % 100000000) + Math.floor(Math.random() * 999);
       var stub = makeStub(id, u);
-
       try {
         if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
           window.flutter_inappwebview.callHandler('windowOpen', u, id, name || '');
@@ -200,10 +173,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         UserScript(
           source: _windowOpenPolyfill,
           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-        ),
-        UserScript(
-          source: _windowOpenPolyfill,
-          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
         ),
       ]);
 
@@ -228,17 +197,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     } catch (_) {}
   }
 
-  Future<void> _injectPolyfill(InAppWebViewController c) async {
-    try {
-      await c.evaluateJavascript(source: _windowOpenPolyfill);
-    } catch (_) {}
-  }
-
   void _openPopup(String url, int id) {
     final cb = widget.onWindowOpen;
     if (cb == null) return;
     if (url.isEmpty) url = 'about:blank';
-    // Never load popup URL into this (main) WebView.
     cb(url, id, () {
       final c = _controller;
       if (c == null) return;
@@ -318,13 +280,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         widget.tab.isLoading = true;
         widget.tab.progress = 0;
         final s = url?.toString() ?? '';
-        // Ignore accidental about:blank navigations that would wipe the page
-        // (can happen if multi-window mishandles open). Do not clear address.
         if (s.isNotEmpty && s != 'about:blank') {
           widget.tab.url = s;
           widget.tab.addressText = s;
         }
-        _injectPolyfill(controller);
         widget.onChanged();
       },
       onProgressChanged: (controller, progress) {
@@ -340,7 +299,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           widget.tab.url = s;
           widget.tab.addressText = s;
         }
-        // If main view was wrongly navigated to about:blank while we had a page, try goBack
         if ((s.isEmpty || s == 'about:blank') &&
             widget.tab.addressText.isNotEmpty &&
             widget.tab.addressText != 'about:blank') {
@@ -355,12 +313,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           widget.tab.title = title.trim();
         } else if (widget.tab.isBlank) {
           widget.tab.title = '新标签';
-        }
-        await _injectPolyfill(controller);
-        for (final ms in [200, 800, 2000]) {
-          Future<void>.delayed(Duration(milliseconds: ms), () {
-            _injectPolyfill(controller);
-          });
         }
         await _syncNav();
       },
@@ -379,18 +331,13 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        // CRITICAL: do not load this request in the current WebView.
-        // Open overlay popup only.
         var url = createWindowAction.request.url?.toString() ?? '';
         if (url.isEmpty) url = 'about:blank';
         final id = ++_windowSeq;
         _openPopup(url, id);
-        // false = cancel default (do NOT load into this WebView / do not require windowId child)
         return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
-        // Always allow normal in-page navigation.
-        // Popup targets should not appear here if polyfill works.
         return NavigationActionPolicy.ALLOW;
       },
     );
