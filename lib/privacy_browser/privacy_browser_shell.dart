@@ -147,12 +147,12 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     if (mounted) setState(() => _showTabs = false);
   }
 
-  /// Real window.open popup (for 15s jump detection etc.).
+  /// Real window.open popup — blank first, then location.replace into same UI.
   void _onWindowOpen(String url, int windowId, VoidCallback onClosed) {
     if (!mounted) return;
     WindowPopupPage.open(
       context,
-      url: url,
+      url: url.isEmpty ? 'about:blank' : url,
       windowId: windowId,
       onClosed: onClosed,
     );

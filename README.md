@@ -8,7 +8,7 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - **显示名**: 隐私浏览器  
 - **Bundle ID**: `com.tongyong.browser`（独立包，不覆盖旧测试包）  
-- **版本**: 1.0.4 (Build 29)  
+- **版本**: 1.0.5 (Build 30)  
 - **IPA**: `Tongyong-Browser-iOS.ipa`
 
 ## 功能
@@ -16,11 +16,10 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 - **Safari 风格界面**：底部地址栏胶囊 + 工具栏  
 - 地址栏访问 / DuckDuckGo 搜索  
 - 多标签（最多 8），标签面板  
-- **真实 `window.open` 弹窗**（返回带 closed/close 的窗口对象，便于站点 15 秒跳转检测）  
-- 普通链接：当前页正常跳转（像 Safari）  
+- **window.open 方案二**：`about:blank` 真弹窗 + `location.replace`/`href` 驱动同一弹窗（适配 Jiurelay 教程验证）  
+- 普通链接：当前页正常跳转  
 - **内置书签** Jiurelay  
-- 清除浏览数据 / 进后台核清  
-- 简洁无痕版
+- 清除浏览数据 / 进后台核清
 
 ## 本地构建
 

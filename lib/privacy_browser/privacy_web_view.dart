@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'browser_tab_model.dart';
+import 'popup_registry.dart';
 
 typedef TabChanged = void Function();
 
@@ -18,7 +19,7 @@ class PrivacyWebView extends StatefulWidget {
   final TabChanged onChanged;
   final void Function(InAppWebViewController controller) onControllerReady;
 
-  /// Real `window.open`: show popup UI; when user closes, invoke [onClosed].
+  /// Show popup UI for window.open(url).
   final void Function(String url, int windowId, VoidCallback onClosed)?
       onWindowOpen;
 
@@ -54,12 +55,35 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
   );
 
-  /// Polyfill so page gets a Window-like object with closed/close.
+  /// Scheme 2: blank window + location.replace/href → same popup WebView.
   static const _windowOpenPolyfill = r'''
 (function(){
-  if (window.__pbWinOpenV2) return;
-  window.__pbWinOpenV2 = true;
+  if (window.__pbWinOpenV3) return;
+  window.__pbWinOpenV3 = true;
   window.__pbPopups = window.__pbPopups || {};
+
+  function absUrl(u) {
+    try {
+      if (!u || u === 'about:blank') return u || 'about:blank';
+      if (String(u).indexOf('javascript:') === 0) return null;
+      if (String(u).indexOf('http') === 0 || String(u).indexOf('about:') === 0) return String(u);
+      return new URL(String(u), location.href).href;
+    } catch(e) { return String(u); }
+  }
+
+  function navigatePopup(id, u) {
+    var url = absUrl(u);
+    if (!url) return;
+    try {
+      var s = window.__pbPopups[id];
+      if (s && s.location) s.location._href = url;
+    } catch(e){}
+    try {
+      if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+        window.flutter_inappwebview.callHandler('windowNavigate', id, url);
+      }
+    } catch(e){}
+  }
 
   window.__pbMarkPopupClosed = function(id) {
     try {
@@ -68,27 +92,55 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       try { window.focus(); } catch(e){}
       try {
         window.dispatchEvent(new Event('focus'));
-        if (typeof document.hidden !== 'undefined') {
-          try {
-            Object.defineProperty(document, 'hidden', { configurable: true, get: function(){ return false; } });
-          } catch(e2){}
-        }
         document.dispatchEvent(new Event('visibilitychange'));
       } catch(e){}
     } catch(e){}
   };
 
+  function makeLocation(id, initial) {
+    var loc = { _href: initial || 'about:blank' };
+    Object.defineProperty(loc, 'href', {
+      configurable: true,
+      enumerable: true,
+      get: function(){ return this._href; },
+      set: function(u){ navigatePopup(id, u); }
+    });
+    loc.replace = function(u){ navigatePopup(id, u); };
+    loc.assign = function(u){ navigatePopup(id, u); };
+    loc.toString = function(){ return this._href; };
+    return loc;
+  }
+
+  function makeDocument() {
+    var body = { textContent: '', innerHTML: '', style: {} };
+    var doc = {
+      readyState: 'complete',
+      body: body,
+      documentElement: { style: {} },
+      getElementById: function(){ return null; },
+      querySelector: function(){ return null; },
+      querySelectorAll: function(){ return []; },
+      createElement: function(){ return { style: {}, appendChild: function(){}, setAttribute: function(){} }; },
+      write: function(){},
+      open: function(){},
+      close: function(){}
+    };
+    var _title = '';
+    Object.defineProperty(doc, 'title', {
+      configurable: true,
+      get: function(){ return _title; },
+      set: function(v){ _title = String(v || ''); }
+    });
+    return doc;
+  }
+
   function makeStub(id, url) {
     var stub = {
       closed: false,
       name: '',
-      opener: window,
-      location: {
-        href: url || 'about:blank',
-        replace: function(u){ this.href = u; },
-        assign: function(u){ this.href = u; }
-      },
-      document: { readyState: 'complete', title: '' },
+      opener: null,
+      location: makeLocation(id, url || 'about:blank'),
+      document: makeDocument(),
       focus: function(){},
       blur: function(){},
       postMessage: function(){},
@@ -107,20 +159,17 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
 
   window.open = function(url, name, specs) {
     try {
-      url = (url == null || url === '') ? 'about:blank' : String(url);
-      if (url.indexOf('javascript:') === 0) return null;
-      try {
-        if (url !== 'about:blank' && url.indexOf('http') !== 0) {
-          url = new URL(url, location.href).href;
-        }
-      } catch(e){}
+      var u = (url == null || url === '') ? 'about:blank' : String(url);
+      if (u.indexOf('javascript:') === 0) return null;
+      u = absUrl(u);
+      if (!u) return null;
 
       var id = (Date.now() % 100000000) + Math.floor(Math.random() * 999);
-      var stub = makeStub(id, url);
+      var stub = makeStub(id, u);
 
       try {
         if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
-          window.flutter_inappwebview.callHandler('windowOpen', url, id, name || '');
+          window.flutter_inappwebview.callHandler('windowOpen', u, id, name || '');
         }
       } catch(e){}
       return stub;
@@ -207,8 +256,28 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         );
 
         controller.addJavaScriptHandler(
+          handlerName: 'windowNavigate',
+          callback: (args) {
+            final id = args.isNotEmpty
+                ? int.tryParse(args[0]?.toString() ?? '') ?? 0
+                : 0;
+            final url = args.length > 1 ? args[1]?.toString() ?? '' : '';
+            if (id != 0 && url.isNotEmpty) {
+              PopupRegistry.navigate(id, url);
+            }
+            return null;
+          },
+        );
+
+        controller.addJavaScriptHandler(
           handlerName: 'windowClose',
           callback: (args) {
+            final id = args.isNotEmpty
+                ? int.tryParse(args[0]?.toString() ?? '') ?? 0
+                : 0;
+            if (id != 0) {
+              PopupRegistry.closeFromPage(id);
+            }
             return null;
           },
         );
@@ -224,7 +293,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           widget.tab.url = s;
           widget.tab.addressText = s;
         }
-        // Early inject so first click can open
         _injectPolyfill(controller);
         widget.onChanged();
       },
@@ -250,12 +318,11 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           widget.tab.title = '新标签';
         }
         await _injectPolyfill(controller);
-        Future<void>.delayed(const Duration(milliseconds: 300), () {
-          _injectPolyfill(controller);
-        });
-        Future<void>.delayed(const Duration(milliseconds: 1000), () {
-          _injectPolyfill(controller);
-        });
+        for (final ms in [200, 600, 1500]) {
+          Future<void>.delayed(Duration(milliseconds: ms), () {
+            _injectPolyfill(controller);
+          });
+        }
         await _syncNav();
       },
       onTitleChanged: (controller, title) {
@@ -280,7 +347,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
-        // Normal navigation in current tab (like Safari).
         return NavigationActionPolicy.ALLOW;
       },
     );
