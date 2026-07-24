@@ -145,22 +145,22 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.5
-          name: 隐私浏览器 iOS v1.0.5
+          tag_name: v1.0.6
+          name: 隐私浏览器 iOS v1.0.6
           body: |
-            ## 隐私浏览器 · window.open 方案二
+            ## 隐私浏览器 · 方案二加固
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.5 · **Build**: 30
+            - **Version**: 1.0.6 · **Build**: 31
 
-            ### 针对 Jiurelay 类站点
-            - `window.open('about:blank')` → 立刻开弹窗 WebView
-            - 可写伪 `document.title` / `document.body`
-            - **`location.replace` / `location.href`** → 同一弹窗加载真实教程 URL
-            - `closed` / `close()` 与关窗联动
-            - 普通链接仍当前页打开；进后台仍核清
+            ### 方案二（Jiurelay）
+            - `window.open('about:blank')` → 真弹窗
+            - 可写 `document.title` / `body.textContent`
+            - `location.replace` / `href` → **同一弹窗**加载教程（含排队：接口返回早于弹窗挂载也能 apply）
+            - 本页倒计时到 0 即可（不必人在教程页挂机）
+            - 进后台仍核清
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

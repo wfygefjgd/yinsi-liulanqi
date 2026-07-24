@@ -58,8 +58,8 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
   /// Scheme 2: blank window + location.replace/href → same popup WebView.
   static const _windowOpenPolyfill = r'''
 (function(){
-  if (window.__pbWinOpenV3) return;
-  window.__pbWinOpenV3 = true;
+  if (window.__pbWinOpenV4) return;
+  window.__pbWinOpenV4 = true;
   window.__pbPopups = window.__pbPopups || {};
 
   function absUrl(u) {
@@ -112,7 +112,19 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
   }
 
   function makeDocument() {
-    var body = { textContent: '', innerHTML: '', style: {} };
+    var _tc = '';
+    var _ih = '';
+    var body = { style: {} };
+    Object.defineProperty(body, 'textContent', {
+      configurable: true,
+      get: function(){ return _tc; },
+      set: function(v){ _tc = String(v == null ? '' : v); }
+    });
+    Object.defineProperty(body, 'innerHTML', {
+      configurable: true,
+      get: function(){ return _ih; },
+      set: function(v){ _ih = String(v == null ? '' : v); _tc = _ih; }
+    });
     var doc = {
       readyState: 'complete',
       body: body,
@@ -120,7 +132,9 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       getElementById: function(){ return null; },
       querySelector: function(){ return null; },
       querySelectorAll: function(){ return []; },
-      createElement: function(){ return { style: {}, appendChild: function(){}, setAttribute: function(){} }; },
+      createElement: function(){
+        return { style: {}, appendChild: function(){}, setAttribute: function(){}, textContent: '', innerHTML: '' };
+      },
       write: function(){},
       open: function(){},
       close: function(){}

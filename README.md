@@ -8,7 +8,7 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - **显示名**: 隐私浏览器  
 - **Bundle ID**: `com.tongyong.browser`（独立包，不覆盖旧测试包）  
-- **版本**: 1.0.5 (Build 30)  
+- **版本**: 1.0.6 (Build 31)  
 - **IPA**: `Tongyong-Browser-iOS.ipa`
 
 ## 功能
