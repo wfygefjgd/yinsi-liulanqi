@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -72,11 +74,23 @@ class _PopupChromeState extends State<_PopupChrome> {
   String _url = '';
   bool _closed = false;
 
+  static final _rng = Random();
+  static const _iosVersions = ['16_0', '16_1', '16_2', '17_0', '17_1', '17_2', '17_4'];
+  static const _safariBuilds = ['605.1.15', '605.1.16', '604.1'];
+  static const _mobileIds = ['15E148', '16A366', '17A849', '17F80'];
+
+  static String _randomUA() {
+    final ios = _iosVersions[_rng.nextInt(_iosVersions.length)];
+    final build = _safariBuilds[_rng.nextInt(_safariBuilds.length)];
+    final mobile = _mobileIds[_rng.nextInt(_mobileIds.length)];
+    return 'Mozilla/5.0 (iPhone; CPU iPhone OS $ios like Mac OS X) AppleWebKit/$build (KHTML, like Gecko) Version/17.0 Mobile/$mobile Safari/604.1';
+  }
+
   /// Identical privacy profile to main PrivacyWebView.
-  static final InAppWebViewSettings _privacySettings = InAppWebViewSettings(
+  InAppWebViewSettings get _privacySettings => InAppWebViewSettings(
     incognito: true,
     javaScriptEnabled: true,
-    domStorageEnabled: true,
+    domStorageEnabled: false,
     databaseEnabled: false,
     cacheEnabled: false,
     clearCache: true,
@@ -93,8 +107,7 @@ class _PopupChromeState extends State<_PopupChrome> {
     supportMultipleWindows: false,
     useShouldOverrideUrlLoading: true,
     sharedCookiesEnabled: false,
-    userAgent:
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    userAgent: _randomUA(),
   );
 
   static const _blankHtml = '''
@@ -153,6 +166,9 @@ class _PopupChromeState extends State<_PopupChrome> {
       _closed = true;
       PopupRegistry.unregister(widget.windowId);
     }
+    try {
+      _controller?.dispose();
+    } catch (_) {}
     super.dispose();
   }
 

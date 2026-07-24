@@ -44,10 +44,10 @@ import WebKit
 enum PrivacyNativeWipe {
   static func run(completion: @escaping () -> Void) {
     let group = DispatchGroup()
+    let types = WKWebsiteDataStore.allWebsiteDataTypes()
 
     // 1) Default website data store
     group.enter()
-    let types = WKWebsiteDataStore.allWebsiteDataTypes()
     WKWebsiteDataStore.default().removeData(
       ofTypes: types,
       modifiedSince: Date(timeIntervalSince1970: 0)
@@ -57,35 +57,46 @@ enum PrivacyNativeWipe {
 
     // 2) Non-persistent store
     group.enter()
-    let nonPersist = WKWebsiteDataStore.nonPersistent()
-    nonPersist.removeData(
+    WKWebsiteDataStore.nonPersistent().removeData(
       ofTypes: types,
       modifiedSince: Date(timeIntervalSince1970: 0)
     ) {
       group.leave()
     }
 
+    // 3) HTTP cookies
     HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
     HTTPCookieStorage.shared.removeCookies(since: .distantPast)
+
+    // 4) HSTS cache (preloaded HTTP Strict Transport Security)
+    if #available(iOS 14.0, *) {
+        URLSession.shared.configuration.urlCache?.removeAllCachedResponses()
+        URLSession.shared.configuration.httpCookieStorage?.removeCookies(since: .distantPast)
+    }
+
+    // 5) URLCache - disable completely
     URLCache.shared.removeAllCachedResponses()
     URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0, diskPath: nil)
     URLSession.shared.reset {}
 
+    // 6) Sandbox files
     wipeSandboxFiles()
     wipeUserDefaults()
     wipeKeychain()
 
-    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.15) {
+    // 7) Second pass after delay (catch async writers)
+    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.2) {
       wipeSandboxFiles()
+      HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
     }
 
     group.notify(queue: .main) {
+      // Final pass on default store
       WKWebsiteDataStore.default().removeData(
         ofTypes: types,
         modifiedSince: Date(timeIntervalSince1970: 0)
-      ) {
-        completion()
-      }
+      ) { }
+      completion()
     }
   }
 
@@ -100,8 +111,9 @@ enum PrivacyNativeWipe {
       home.appendingPathComponent("Library/Application Support"),
       home.appendingPathComponent("Library/Preferences"),
       home.appendingPathComponent("Library/SplashBoard"),
+      home.appendingPathComponent("Library/Saved Application State"),
+      home.appendingPathComponent("Library/WebKit/WebsiteData"),
       home.appendingPathComponent("tmp"),
-      URL(fileURLWithPath: NSTemporaryDirectory()),
       home.appendingPathComponent("Documents"),
     ]
     for url in targets {

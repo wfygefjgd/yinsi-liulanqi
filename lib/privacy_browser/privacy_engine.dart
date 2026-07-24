@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -11,9 +12,14 @@ class PrivacyEngine {
 
   static const _channel = MethodChannel('privacy_browser/engine');
   static bool _wiping = false;
+  static final List<Completer<void>> _waiters = [];
 
   static Future<void> nuclearWipe({bool exitAfter = false}) async {
-    if (_wiping) return;
+    if (_wiping) {
+      final completer = Completer<void>();
+      _waiters.add(completer);
+      return completer.future;
+    }
     _wiping = true;
     try {
       // Drop any open popup overlay storage path via web layer first
@@ -32,6 +38,10 @@ class PrivacyEngine {
       }
     } finally {
       _wiping = false;
+      for (final w in _waiters) {
+        w.complete();
+      }
+      _waiters.clear();
     }
   }
 
@@ -56,6 +66,12 @@ class PrivacyEngine {
     } catch (_) {}
     try {
       await InAppWebViewController.clearAllCache();
+    } catch (_) {}
+    try {
+      final data = await Clipboard.getData(Clipboard.kTextPlain);
+      if (data != null && data.text != null && data.text!.isNotEmpty) {
+        await Clipboard.setData(const ClipboardData(text: ' '));
+      }
     } catch (_) {}
   }
 

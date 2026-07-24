@@ -1,4 +1,4 @@
-# 隐私浏览器（简洁 1.0.9）
+# 隐私浏览器（简洁 1.0.10）
 
 classic 纯净行为 + 必要 window.open 弹窗；后台只清数据不杀进程。
 
@@ -8,7 +8,7 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - **显示名**: 隐私浏览器
 - **Bundle ID**: `com.tongyong.browser`
-- **版本**: 1.0.9 (Build 34)
+- **版本**: 1.0.10 (Build 35)
 - **IPA**: `Tongyong-Browser-iOS.ipa`
 
 ## 功能
@@ -58,6 +58,22 @@ flutter build ios --release --no-codesign
 ```
 
 ## 更新日志
+
+### v1.0.10 (Build 35) — 隐私强化与 Bug 修复
+
+**核心变更**：全面修复隐私泄露问题，增强清理能力。
+
+- **WebView 设置修复**：关闭 `domStorageEnabled`，彻底禁用 localStorage/sessionStorage
+- **WebView 设置修复**：关闭 `supportMultipleWindows`，禁止多窗口数据残留
+- **User-Agent 随机化**：每次创建 WebView 时随机生成不同的 UA（7 个 iOS 版本 × 3 个 WebKit 构建 × 4 个 Mobile ID）
+- **移除 AutomaticKeepAliveClientMixin**：WebView 不再保持存活，避免内存残留
+- **弹窗 WebView 同步修复**：与主 WebView 应用相同的隐私设置和随机 UA
+- **资源泄漏修复**：关闭标签页、弹窗、Shell 释放时正确 dispose WebView 控制器
+- **清理竞态条件修复**：清理进行中新调用会排队等待，而非静默丢弃
+- **剪贴板清空增强**：先检查再清空，确保 iOS 上可靠清除
+- **HSTS 缓存清理**：新增 HSTS 和 URLSession cookie 存储清理
+- **Keychain 清理**：新增 Keychain 全量清理（v1.0 可能未覆盖）
+- **原生层清理优化**：移除冗余清理，扩展目录列表
 
 ### v1.0.9 (Build 34) — classic 回归
 

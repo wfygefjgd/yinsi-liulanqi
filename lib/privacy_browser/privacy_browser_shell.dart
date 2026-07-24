@@ -86,6 +86,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _disposeControllers();
     _addressCtrl.dispose();
     _addressFocus.dispose();
     super.dispose();
@@ -111,7 +112,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     // Classic: destroy WebViews + wipe site data, do NOT kill process
     // (kill-on-background caused "environment changed too often" on sites)
     WindowPopupOverlay.hide(notify: false);
-    _controllers.clear();
+    _disposeControllers();
     await PrivacyEngine.wipeOnBackground();
     if (!mounted) return;
     try {
@@ -119,6 +120,15 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     } catch (_) {}
     _addressCtrl.clear();
     if (mounted) setState(() => _showTabs = false);
+  }
+
+  void _disposeControllers() {
+    for (final c in _controllers.values) {
+      try {
+        c.dispose();
+      } catch (_) {}
+    }
+    _controllers.clear();
   }
 
   void _rebuildAfterWipe() {
@@ -261,7 +271,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   Future<void> _runHardReset() async {
     if (_resetting) return;
     setState(() => _resetting = true);
-    _controllers.clear();
+    _disposeControllers();
     context.read<TabManager>().hardResetTabs();
     _addressCtrl.clear();
     await PrivacyEngine.resetAndRelaunch();
@@ -355,7 +365,10 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                         },
                         onClose: (i) {
                           final id = tm.tabs[i].id;
-                          _controllers.remove(id);
+                          final ctrl = _controllers.remove(id);
+                          try {
+                            ctrl?.dispose();
+                          } catch (_) {}
                           tm.closeTab(i);
                           _addressCtrl.text = tm.active.isBlank
                               ? ''
