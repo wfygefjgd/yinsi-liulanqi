@@ -7,6 +7,7 @@ import 'browser_tab_model.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
 import 'tab_manager.dart';
+import 'window_popup_page.dart';
 
 /// Safari-like dark palette
 class _S {
@@ -146,22 +147,15 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     if (mounted) setState(() => _showTabs = false);
   }
 
-  void _openInNewTab(String url) {
-    final tm = context.read<TabManager>();
-    final ok = tm.openInNewTabForeground(url);
+  /// Real window.open popup (for 15s jump detection etc.).
+  void _onWindowOpen(String url, int windowId, VoidCallback onClosed) {
     if (!mounted) return;
-    // Switch address bar to the new active tab
-    _addressCtrl.text = tm.active.addressText;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(ok ? '已在新标签打开（上一页仍在标签里）' : '无法打开'),
-        duration: const Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: _S.field,
-      ),
+    WindowPopupPage.open(
+      context,
+      url: url,
+      windowId: windowId,
+      onClosed: onClosed,
     );
-    setState(() {});
   }
 
   Future<void> _openBookmark(_Bookmark b) async {
@@ -331,7 +325,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                           PrivacyWebView(
                             key: ValueKey(t.id),
                             tab: t,
-                            onOpenInBackground: _openInNewTab,
+                            onWindowOpen: _onWindowOpen,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
@@ -668,7 +662,7 @@ class _SafariStartPage extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               const Text(
-                '底部搜索 · 点链接新标签打开',
+                '底部搜索 · 支持网站 window.open 弹窗',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _S.secondary, fontSize: 13),
               ),

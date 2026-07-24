@@ -145,20 +145,22 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.3
-          name: 隐私浏览器 iOS v1.0.3
+          tag_name: v1.0.4
+          name: 隐私浏览器 iOS v1.0.4
           body: |
-            ## 隐私浏览器 · 点链接新标签前台打开
+            ## 隐私浏览器 · 真实 window.open
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.3 · **Build**: 28
+            - **Version**: 1.0.4 · **Build**: 29
 
-            ### 变更
-            - **点击链接 → 新标签前台打开**（跳到新页，旧页留在标签列表）
-            - Safari 底栏 + 内置书签 Jiurelay
-            - 清除数据 / 进后台核清
+            ### 变更（为 15 秒跳转检测）
+            - **`window.open` 真弹窗**：App 内全屏 WebView
+            - 返回伪窗口对象：`closed` / `close()` / `focus` / `opener`
+            - 关闭弹窗后通知原页（`closed=true` + focus 事件）
+            - 普通链接：当前页正常打开（不再劫持成新标签）
+            - 进后台仍核清数据（隐私默认保留）
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`
