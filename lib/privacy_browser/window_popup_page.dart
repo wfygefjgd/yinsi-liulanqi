@@ -3,47 +3,91 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'popup_registry.dart';
 
-/// Full-screen popup for `window.open` — same instance navigated via location.replace.
-class WindowPopupPage extends StatefulWidget {
-  const WindowPopupPage({
-    super.key,
-    required this.initialUrl,
-    required this.windowId,
-    this.onClosed,
-  });
+/// Overlay popup for window.open — does NOT replace the underlying browser route.
+class WindowPopupOverlay {
+  WindowPopupOverlay._();
 
-  final String initialUrl;
-  final int windowId;
-  final VoidCallback? onClosed;
+  static OverlayEntry? _entry;
+  static int? _activeId;
 
-  static Future<void> open(
+  static void show(
     BuildContext context, {
     required String url,
     required int windowId,
     VoidCallback? onClosed,
   }) {
-    return Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => WindowPopupPage(
-          initialUrl: url,
-          windowId: windowId,
-          onClosed: onClosed,
-        ),
+    // One popup at a time for simplicity
+    hide(notify: false);
+
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (ctx) => _PopupChrome(
+        initialUrl: url.isEmpty ? 'about:blank' : url,
+        windowId: windowId,
+        onRequestClose: () {
+          hide(notify: true);
+          onClosed?.call();
+        },
       ),
     );
+    _entry = entry;
+    _activeId = windowId;
+
+    final overlay = Overlay.of(context, rootOverlay: true);
+    overlay.insert(entry);
   }
 
-  @override
-  State<WindowPopupPage> createState() => _WindowPopupPageState();
+  static void hide({bool notify = true}) {
+    final e = _entry;
+    _entry = null;
+    final id = _activeId;
+    _activeId = null;
+    if (id != null) {
+      PopupRegistry.unregister(id);
+    }
+    e?.remove();
+  }
+
+  static bool get isShowing => _entry != null;
 }
 
-class _WindowPopupPageState extends State<WindowPopupPage> {
+class _PopupChrome extends StatefulWidget {
+  const _PopupChrome({
+    required this.initialUrl,
+    required this.windowId,
+    required this.onRequestClose,
+  });
+
+  final String initialUrl;
+  final int windowId;
+  final VoidCallback onRequestClose;
+
+  @override
+  State<_PopupChrome> createState() => _PopupChromeState();
+}
+
+class _PopupChromeState extends State<_PopupChrome> {
   InAppWebViewController? _controller;
   double _progress = 0;
-  String _title = '弹窗';
+  String _title = '新窗口';
   String _url = '';
-  bool _closedNotified = false;
+  bool _closed = false;
+
+  static const _blankHtml = '''
+<!DOCTYPE html><html><head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>正在打开…</title>
+<style>
+  body{margin:0;padding:32px 24px;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;
+  background:#f5f5f7;color:#1d1d1f;text-align:center;}
+  .c{margin-top:40vh;transform:translateY(-50%);}
+  p{font-size:15px;color:#6e6e73;line-height:1.5;}
+</style></head><body><div class="c">
+<p>请稍候…</p>
+<p style="font-size:13px;">正在确认并打开页面</p>
+</div></body></html>
+''';
 
   @override
   void initState() {
@@ -54,159 +98,189 @@ class _WindowPopupPageState extends State<WindowPopupPage> {
   }
 
   void _navigateTo(String url) {
+    if (_closed) return;
     final c = _controller;
-    if (c == null) {
-      _url = url;
-      return;
-    }
-    if (url.isEmpty) return;
     setState(() {
       _url = url;
       _title = '加载中…';
     });
+    if (c == null) return;
+    if (url.isEmpty || url == 'about:blank') {
+      c.loadData(
+        data: _blankHtml,
+        mimeType: 'text/html',
+        encoding: 'utf-8',
+        baseUrl: WebUri('about:blank'),
+      );
+      return;
+    }
     c.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
   void _closeFromPage() {
-    if (!mounted) return;
-    _notifyClosed();
-    Navigator.of(context).maybePop();
+    if (_closed) return;
+    _finishClose();
   }
 
-  void _notifyClosed() {
-    if (_closedNotified) return;
-    _closedNotified = true;
+  void _finishClose() {
+    if (_closed) return;
+    _closed = true;
     PopupRegistry.unregister(widget.windowId);
-    widget.onClosed?.call();
+    widget.onRequestClose();
   }
 
   @override
   void dispose() {
-    _notifyClosed();
+    if (!_closed) {
+      _closed = true;
+      PopupRegistry.unregister(widget.windowId);
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Material(
-              color: const Color(0xFF1C1C1E),
-              child: SizedBox(
-                height: 48,
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white),
-                      onPressed: () {
-                        _notifyClosed();
-                        Navigator.of(context).pop();
+    final top = MediaQuery.of(context).padding.top;
+    return Material(
+      color: Colors.black.withOpacity(0.45),
+      child: Stack(
+        children: [
+          // Tap dim area does NOT close (site may need popup open)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+          // Sheet from top — looks like a browser popup, main page stays underneath
+          Positioned(
+            left: 0,
+            right: 0,
+            top: top + 8,
+            bottom: 0,
+            child: Material(
+              color: const Color(0xFF000000),
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(14)),
+              clipBehavior: Clip.antiAlias,
+              elevation: 16,
+              child: Column(
+                children: [
+                  Container(
+                    height: 48,
+                    color: const Color(0xFF1C1C1E),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          tooltip: '关闭弹窗',
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: _finishClose,
+                        ),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                _url.isEmpty || _url == 'about:blank'
+                                    ? 'about:blank'
+                                    : _url,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.refresh,
+                              color: Color(0xFF0A84FF)),
+                          onPressed: () => _controller?.reload(),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_progress > 0 && _progress < 1)
+                    LinearProgressIndicator(
+                      value: _progress,
+                      minHeight: 2,
+                      color: const Color(0xFF0A84FF),
+                      backgroundColor: Colors.transparent,
+                    ),
+                  Expanded(
+                    child: InAppWebView(
+                      // Prefer HTML data for blank so user sees content, not empty black
+                      initialData: (widget.initialUrl.isEmpty ||
+                              widget.initialUrl == 'about:blank')
+                          ? InAppWebViewInitialData(
+                              data: _blankHtml,
+                              mimeType: 'text/html',
+                              encoding: 'utf-8',
+                              baseUrl: WebUri('about:blank'),
+                            )
+                          : null,
+                      initialUrlRequest: (widget.initialUrl.isEmpty ||
+                              widget.initialUrl == 'about:blank')
+                          ? null
+                          : URLRequest(url: WebUri(widget.initialUrl)),
+                      initialSettings: InAppWebViewSettings(
+                        javaScriptEnabled: true,
+                        domStorageEnabled: true,
+                        javaScriptCanOpenWindowsAutomatically: false,
+                        supportMultipleWindows: false,
+                        useShouldOverrideUrlLoading: true,
+                        transparentBackground: false,
+                        userAgent:
+                            'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+                      ),
+                      onWebViewCreated: (c) {
+                        _controller = c;
+                      },
+                      onProgressChanged: (c, p) {
+                        setState(() => _progress = p / 100.0);
+                      },
+                      onTitleChanged: (c, t) {
+                        if (t != null && t.trim().isNotEmpty) {
+                          setState(() => _title = t.trim());
+                        }
+                      },
+                      onLoadStop: (c, u) {
+                        if (u != null) {
+                          final s = u.toString();
+                          if (!s.startsWith('data:')) {
+                            setState(() => _url = s);
+                          }
+                        }
+                      },
+                      onCreateWindow: (c, a) async {
+                        final u = a.request.url;
+                        if (u != null) {
+                          await c.loadUrl(urlRequest: URLRequest(url: u));
+                        }
+                        return false;
+                      },
+                      shouldOverrideUrlLoading: (c, a) async {
+                        return NavigationActionPolicy.ALLOW;
                       },
                     ),
-                    Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            _url,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.refresh, color: Color(0xFF0A84FF)),
-                      onPressed: () => _controller?.reload(),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            if (_progress > 0 && _progress < 1)
-              LinearProgressIndicator(
-                value: _progress,
-                minHeight: 2,
-                color: const Color(0xFF0A84FF),
-                backgroundColor: Colors.transparent,
-              ),
-            Expanded(
-              child: InAppWebView(
-                initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
-                initialSettings: InAppWebViewSettings(
-                  javaScriptEnabled: true,
-                  domStorageEnabled: true,
-                  javaScriptCanOpenWindowsAutomatically: true,
-                  supportMultipleWindows: false,
-                  useShouldOverrideUrlLoading: true,
-                  userAgent:
-                      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-                ),
-                onWebViewCreated: (c) {
-                  _controller = c;
-                  // If navigate arrived before controller ready
-                  if (_url.isNotEmpty &&
-                      _url != widget.initialUrl &&
-                      _url != 'about:blank') {
-                    c.loadUrl(urlRequest: URLRequest(url: WebUri(_url)));
-                  }
-                },
-                onProgressChanged: (c, p) {
-                  setState(() => _progress = p / 100.0);
-                },
-                onTitleChanged: (c, t) {
-                  if (t != null && t.trim().isNotEmpty) {
-                    setState(() => _title = t.trim());
-                  }
-                },
-                onLoadStop: (c, u) async {
-                  if (u != null) setState(() => _url = u.toString());
-                  // about:blank placeholder text for sites that only set opener-side document
-                  if (u != null && u.toString().startsWith('about:blank')) {
-                    try {
-                      await c.evaluateJavascript(source: r'''
-document.title = document.title || '正在打开…';
-if (document.body && !document.body.dataset.pb) {
-  document.body.dataset.pb = '1';
-  document.body.style.cssText = 'font-family:-apple-system,sans-serif;padding:24px;color:#333;';
-  document.body.textContent = '请稍候，正在确认并打开页面…';
-}
-''');
-                    } catch (_) {}
-                  }
-                },
-                onCreateWindow: (c, action) async {
-                  final u = action.request.url;
-                  if (u != null) {
-                    await c.loadUrl(urlRequest: URLRequest(url: u));
-                  }
-                  return false;
-                },
-                shouldOverrideUrlLoading: (c, action) async {
-                  return NavigationActionPolicy.ALLOW;
-                },
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

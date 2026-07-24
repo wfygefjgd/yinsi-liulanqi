@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -19,7 +21,7 @@ class PrivacyWebView extends StatefulWidget {
   final TabChanged onChanged;
   final void Function(InAppWebViewController controller) onControllerReady;
 
-  /// Show popup UI for window.open(url).
+  /// Show popup UI for window.open(url) — must NOT navigate this WebView.
   final void Function(String url, int windowId, VoidCallback onClosed)?
       onWindowOpen;
 
@@ -32,6 +34,8 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
   InAppWebViewController? _controller;
   int _windowSeq = 0;
 
+  /// Main tab: multi-window so window.open is delivered to onCreateWindow,
+  /// but we cancel loading into this view and open overlay instead.
   static final InAppWebViewSettings _settings = InAppWebViewSettings(
     incognito: true,
     javaScriptEnabled: true,
@@ -55,16 +59,16 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
   );
 
-  /// Scheme 2: blank window + location.replace/href → same popup WebView.
+  /// Scheme 2 polyfill: blank + location.replace → same popup only.
   static const _windowOpenPolyfill = r'''
 (function(){
-  if (window.__pbWinOpenV4) return;
-  window.__pbWinOpenV4 = true;
+  if (window.__pbWinOpenV5) return;
+  window.__pbWinOpenV5 = true;
   window.__pbPopups = window.__pbPopups || {};
 
   function absUrl(u) {
     try {
-      if (!u || u === 'about:blank') return u || 'about:blank';
+      if (!u || u === 'about:blank') return 'about:blank';
       if (String(u).indexOf('javascript:') === 0) return null;
       if (String(u).indexOf('http') === 0 || String(u).indexOf('about:') === 0) return String(u);
       return new URL(String(u), location.href).href;
@@ -112,8 +116,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
   }
 
   function makeDocument() {
-    var _tc = '';
-    var _ih = '';
+    var _tc = '', _ih = '', _title = '';
     var body = { style: {} };
     Object.defineProperty(body, 'textContent', {
       configurable: true,
@@ -123,7 +126,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     Object.defineProperty(body, 'innerHTML', {
       configurable: true,
       get: function(){ return _ih; },
-      set: function(v){ _ih = String(v == null ? '' : v); _tc = _ih; }
+      set: function(v){ _ih = String(v == null ? '' : v); }
     });
     var doc = {
       readyState: 'complete',
@@ -139,7 +142,6 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       open: function(){},
       close: function(){}
     };
-    var _title = '';
     Object.defineProperty(doc, 'title', {
       configurable: true,
       get: function(){ return _title; },
@@ -194,6 +196,17 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
 })();
 ''';
 
+  UnmodifiableListView<UserScript> get _userScripts => UnmodifiableListView([
+        UserScript(
+          source: _windowOpenPolyfill,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        ),
+        UserScript(
+          source: _windowOpenPolyfill,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_END,
+        ),
+      ]);
+
   @override
   bool get wantKeepAlive => true;
 
@@ -225,6 +238,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
     final cb = widget.onWindowOpen;
     if (cb == null) return;
     if (url.isEmpty) url = 'about:blank';
+    // Never load popup URL into this (main) WebView.
     cb(url, id, () {
       final c = _controller;
       if (c == null) return;
@@ -252,6 +266,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
       key: widget.tab.viewKey,
       initialUrlRequest: URLRequest(url: WebUri('about:blank')),
       initialSettings: _settings,
+      initialUserScripts: _userScripts,
       onWebViewCreated: (controller) {
         _controller = controller;
 
@@ -303,6 +318,8 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         widget.tab.isLoading = true;
         widget.tab.progress = 0;
         final s = url?.toString() ?? '';
+        // Ignore accidental about:blank navigations that would wipe the page
+        // (can happen if multi-window mishandles open). Do not clear address.
         if (s.isNotEmpty && s != 'about:blank') {
           widget.tab.url = s;
           widget.tab.addressText = s;
@@ -319,11 +336,19 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         widget.tab.isLoading = false;
         widget.tab.progress = 100;
         final s = url?.toString() ?? '';
-        if (s.isNotEmpty) {
+        if (s.isNotEmpty && s != 'about:blank') {
           widget.tab.url = s;
-          if (s != 'about:blank') {
-            widget.tab.addressText = s;
-          }
+          widget.tab.addressText = s;
+        }
+        // If main view was wrongly navigated to about:blank while we had a page, try goBack
+        if ((s.isEmpty || s == 'about:blank') &&
+            widget.tab.addressText.isNotEmpty &&
+            widget.tab.addressText != 'about:blank') {
+          try {
+            if (await controller.canGoBack()) {
+              await controller.goBack();
+            }
+          } catch (_) {}
         }
         final title = await controller.getTitle();
         if (title != null && title.trim().isNotEmpty) {
@@ -332,7 +357,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
           widget.tab.title = '新标签';
         }
         await _injectPolyfill(controller);
-        for (final ms in [200, 600, 1500]) {
+        for (final ms in [200, 800, 2000]) {
           Future<void>.delayed(Duration(milliseconds: ms), () {
             _injectPolyfill(controller);
           });
@@ -354,13 +379,17 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
+        // CRITICAL: do not load this request in the current WebView.
+        // Open overlay popup only.
         var url = createWindowAction.request.url?.toString() ?? '';
         if (url.isEmpty) url = 'about:blank';
         final id = ++_windowSeq;
         _openPopup(url, id);
-        return false;
+        return true; // we handle it; cancel default into same view
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
+        // Always allow normal in-page navigation.
+        // Popup targets should not appear here if polyfill works.
         return NavigationActionPolicy.ALLOW;
       },
     );

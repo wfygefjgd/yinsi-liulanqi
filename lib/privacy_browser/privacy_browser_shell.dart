@@ -7,7 +7,7 @@ import 'browser_tab_model.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
 import 'tab_manager.dart';
-import 'window_popup_page.dart';
+import 'window_popup_page.dart' show WindowPopupOverlay;
 
 /// Safari-like dark palette
 class _S {
@@ -147,10 +147,10 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     if (mounted) setState(() => _showTabs = false);
   }
 
-  /// Real window.open popup — blank first, then location.replace into same UI.
+  /// Real window.open — Overlay on top of browser (main page stays underneath).
   void _onWindowOpen(String url, int windowId, VoidCallback onClosed) {
     if (!mounted) return;
-    WindowPopupPage.open(
+    WindowPopupOverlay.show(
       context,
       url: url.isEmpty ? 'about:blank' : url,
       windowId: windowId,

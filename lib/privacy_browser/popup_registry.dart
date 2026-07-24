@@ -11,7 +11,8 @@ class PopupRegistry {
     _navigators[id] = nav;
     final pending = _pendingUrls.remove(id);
     if (pending != null && pending.isNotEmpty) {
-      nav(pending);
+      // Defer one frame so WebView controller is ready.
+      Future<void>.microtask(() => nav(pending));
     }
   }
 
@@ -31,7 +32,6 @@ class PopupRegistry {
     if (n != null) {
       n(url);
     } else {
-      // Popup route not mounted yet — remember and apply on register.
       _pendingUrls[id] = url;
     }
   }
