@@ -345,9 +345,6 @@ ${_antiFingerprint}
                       onWebViewCreated: (c) {
                         _controller = c;
                       },
-                      onWebViewCreated: (c) {
-                        _controller = c;
-                      },
                       onProgressChanged: (c, p) {
                         setState(() => _progress = p / 100.0);
                       },
