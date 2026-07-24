@@ -12,12 +12,15 @@ typedef TabChanged = void Function();
 class PrivacyWebView extends StatefulWidget {
   const PrivacyWebView({
     super.key,
+    required this.tabId,
     required this.tab,
     required this.onChanged,
     required this.onControllerReady,
     this.onWindowOpen,
+    this.autoWipe = true,
   });
 
+  final String tabId;
   final BrowserTabModel tab;
   final TabChanged onChanged;
   final void Function(InAppWebViewController controller) onControllerReady;
@@ -25,6 +28,9 @@ class PrivacyWebView extends StatefulWidget {
   /// Show popup UI for window.open(url) — must NOT navigate this WebView.
   final void Function(String url, int windowId, VoidCallback onClosed)?
       onWindowOpen;
+
+  /// When false, use normal (non-incognito) mode — behaves like a regular browser.
+  final bool autoWipe;
 
   @override
   State<PrivacyWebView> createState() => _PrivacyWebViewState();
@@ -47,13 +53,13 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
   }
 
   InAppWebViewSettings get _settings => InAppWebViewSettings(
-    incognito: true,
+    incognito: widget.autoWipe,
     javaScriptEnabled: true,
-    domStorageEnabled: false,
-    databaseEnabled: false,
-    cacheEnabled: false,
-    clearCache: true,
-    thirdPartyCookiesEnabled: false,
+    domStorageEnabled: widget.autoWipe ? false : true,
+    databaseEnabled: widget.autoWipe ? false : true,
+    cacheEnabled: widget.autoWipe ? false : true,
+    clearCache: widget.autoWipe,
+    thirdPartyCookiesEnabled: true,
     mediaPlaybackRequiresUserGesture: true,
     allowsInlineMediaPlayback: true,
     allowsBackForwardNavigationGestures: true,
@@ -66,7 +72,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
     javaScriptCanOpenWindowsAutomatically: true,
     supportMultipleWindows: false,
     useShouldOverrideUrlLoading: true,
-    sharedCookiesEnabled: false,
+    sharedCookiesEnabled: true,
     userAgent: _randomUA(),
   );
 

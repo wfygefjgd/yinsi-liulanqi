@@ -239,12 +239,120 @@ ${_antiFingerprint}
     super.dispose();
   }
 
+  static const _windowOpenPolyfill = r'''
+(function(){
+  if (window.__pbWinOpenV6) return;
+  window.__pbWinOpenV6 = true;
+  window.__pbPopups = window.__pbPopups || {};
+
+  function absUrl(u) {
+    try {
+      if (!u || u === 'about:blank') return 'about:blank';
+      if (String(u).indexOf('javascript:') === 0) return null;
+      if (String(u).indexOf('http') === 0 || String(u).indexOf('about:') === 0) return String(u);
+      return new URL(String(u), location.href).href;
+    } catch(e) { return String(u); }
+  }
+
+  function navigatePopup(id, u) {
+    var url = absUrl(u);
+    if (!url) return;
+    try {
+      if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+        window.flutter_inappwebview.callHandler('windowNavigate', id, url);
+      }
+    } catch(e){}
+  }
+
+  window.__pbMarkPopupClosed = function(id) {
+    try {
+      var s = window.__pbPopups[id];
+      if (s) s.closed = true;
+    } catch(e){}
+  };
+
+  function makeLocation(id, initial) {
+    var loc = { _href: initial || 'about:blank' };
+    Object.defineProperty(loc, 'href', {
+      configurable: true,
+      enumerable: true,
+      get: function(){ return this._href; },
+      set: function(u){ navigatePopup(id, u); }
+    });
+    loc.replace = function(u){ navigatePopup(id, u); };
+    loc.assign = function(u){ navigatePopup(id, u); };
+    loc.toString = function(){ return this._href; };
+    return loc;
+  }
+
+  function makeStub(id, url) {
+    var stub = {
+      closed: false,
+      name: '',
+      opener: null,
+      location: makeLocation(id, url || 'about:blank'),
+      document: {
+        readyState: 'complete',
+        body: { style: {}, textContent: '', innerHTML: '' },
+        documentElement: { style: {} },
+        getElementById: function(){ return null; },
+        querySelector: function(){ return null; },
+        querySelectorAll: function(){ return []; },
+        createElement: function(){
+          return { style: {}, appendChild: function(){}, setAttribute: function(){}, textContent: '', innerHTML: '' };
+        },
+        write: function(){},
+        open: function(){},
+        close: function(){},
+        title: ''
+      },
+      focus: function(){},
+      blur: function(){},
+      postMessage: function(){},
+      close: function(){
+        this.closed = true;
+        try {
+          if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+            window.flutter_inappwebview.callHandler('windowClose', id);
+          }
+        } catch(e){}
+      }
+    };
+    window.__pbPopups[id] = stub;
+    return stub;
+  }
+
+  window.open = function(url, name, specs) {
+    try {
+      var u = (url == null || url === '') ? 'about:blank' : String(url);
+      if (u.indexOf('javascript:') === 0) return null;
+      u = absUrl(u);
+      if (!u) return null;
+      var id = (Date.now() % 100000000) + Math.floor(Math.random() * 999);
+      var stub = makeStub(id, u);
+      try {
+        if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+          window.flutter_inappwebview.callHandler('windowOpen', u, id, name || '');
+        }
+      } catch(e){}
+      return stub;
+    } catch(e) {
+      return null;
+    }
+  };
+})();
+''';
+
   UnmodifiableListView<UserScript> get _userScripts => UnmodifiableListView([
         UserScript(
           source: _antiFingerprint,
           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
         ),
-                  ]);
+        UserScript(
+          source: _windowOpenPolyfill,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        ),
+  ]);
 
   @override
   Widget build(BuildContext context) {

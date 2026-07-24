@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 
 import 'browser_tab_model.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
+import 'settings_page.dart';
 import 'tab_manager.dart';
 import 'window_popup_page.dart' show WindowPopupOverlay;
 
@@ -69,11 +69,12 @@ class PrivacyBrowserShell extends StatefulWidget {
 
 class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     with WidgetsBindingObserver {
+  static const _keyAutoWipe = 'pref_auto_wipe_on_background';
   final _addressCtrl = TextEditingController();
   final _addressFocus = FocusNode();
   final Map<String, InAppWebViewController> _controllers = {};
   bool _resetting = false;
-  bool _backgroundWiped = false;
+  bool _coldStarting = false;
   bool _showTabs = false;
 
   @override
@@ -81,6 +82,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _addressCtrl.text = context.read<TabManager>().active.addressText;
+    _refreshAutoWipePref();
   }
 
   @override
@@ -97,29 +99,62 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
-      if (_backgroundWiped || _resetting) return;
-      _backgroundWiped = true;
-      _silentBackgroundWipe();
+      if (_resetting || _coldStarting) return;
+      _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
-      if (_backgroundWiped) {
-        _backgroundWiped = false;
-        _rebuildAfterWipe();
-      }
+      _onResume();
     }
   }
 
-  Future<void> _silentBackgroundWipe() async {
-    // Classic: destroy WebViews + wipe site data, do NOT kill process
-    // (kill-on-background caused "environment changed too often" on sites)
+  /// Entering background: if auto-wipe enabled, destroy WebViews + wipe + mark cold-start.
+  Future<void> _enterBackground() async {
+    final autoWipe = await _isAutoWipeEnabled();
+    if (!autoWipe) {
+      return;
+    }
+    final tm = context.read<TabManager>();
     WindowPopupOverlay.hide(notify: false);
     _disposeControllers();
     await PrivacyEngine.wipeOnBackground();
+    tm.hardResetTabs();
+    tm.markColdStartPending();
     if (!mounted) return;
-    try {
-      context.read<TabManager>().hardResetTabs();
-    } catch (_) {}
     _addressCtrl.clear();
-    if (mounted) setState(() => _showTabs = false);
+    setState(() => _showTabs = false);
+  }
+
+  /// On resume: refresh pref, then if auto-wipe enabled and cold-start pending, run cold-start.
+  Future<void> _onResume() async {
+    await _refreshAutoWipePref();
+    if (!await _isAutoWipeEnabled()) {
+      return;
+    }
+    final tm = context.read<TabManager>();
+    if (!tm.coldStartPending) return;
+    tm.clearColdStartPending();
+    if (_coldStarting) return;
+    setState(() => _coldStarting = true);
+    await PrivacyEngine.wipeOnLaunch();
+    tm.hardResetTabs();
+    if (!mounted) return;
+    _addressCtrl.clear();
+    setState(() {
+      _coldStarting = false;
+      _showTabs = false;
+    });
+  }
+
+  Future<bool> _isAutoWipeEnabled() async {
+    final prefs = await PrivacyEngine.prefs();
+    return prefs.getBool(_keyAutoWipe) ?? true;
+  }
+
+  bool _autoWipeEnabled = true;
+
+  Future<void> _refreshAutoWipePref() async {
+    final v = await _isAutoWipeEnabled();
+    if (!mounted) return;
+    setState(() => _autoWipeEnabled = v);
   }
 
   void _disposeControllers() {
@@ -131,16 +166,14 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     _controllers.clear();
   }
 
-  void _rebuildAfterWipe() {
-    if (!mounted) return;
-    setState(() {});
-    final tab = context.read<TabManager>().active;
-    _addressCtrl.text = tab.addressText;
-  }
-
   InAppWebViewController? get _activeController {
-    final id = context.read<TabManager>().active.id;
-    return _controllers[id];
+    if (_controllers.isEmpty) return null;
+    final tm = context.read<TabManager>();
+    if (tm.activeIndex >= tm.tabs.length) return null;
+    final id = tm.active.id;
+    final c = _controllers[id];
+    if (c == null) return null;
+    return c;
   }
 
   Future<void> _go(String raw) async {
@@ -177,6 +210,12 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   Future<void> _openBookmark(_Bookmark b) async {
     _addressCtrl.text = b.url;
     await _go(b.url);
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
+    );
   }
 
   Future<void> _showBookmarks() async {
@@ -314,33 +353,38 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
       backgroundColor: _S.bg,
       body: Stack(
         children: [
-          Column(
-            children: [
-              // Thin progress under status bar (Safari)
-              if (tab.isLoading)
-                Padding(
-                  padding: EdgeInsets.only(top: topPad),
-                  child: LinearProgressIndicator(
-                    value: tab.progress > 0 && tab.progress < 100
-                        ? tab.progress / 100
-                        : null,
-                    minHeight: 2,
-                    backgroundColor: Colors.transparent,
-                    color: _S.accent,
-                  ),
-                )
-              else
-                SizedBox(height: topPad),
-              Expanded(
-                child: Stack(
-                  children: [
-                    IndexedStack(
-                      index: tm.activeIndex,
-                      children: [
-                        for (final t in tm.tabs)
+          if (_coldStarting)
+            const _ColdStartSplash()
+          else
+            Column(
+              children: [
+                // Thin progress under status bar (Safari)
+                if (tab.isLoading)
+                  Padding(
+                    padding: EdgeInsets.only(top: topPad),
+                    child: LinearProgressIndicator(
+                      value: tab.progress > 0 && tab.progress < 100
+                          ? tab.progress / 100
+                          : null,
+                      minHeight: 2,
+                      backgroundColor: Colors.transparent,
+                      color: _S.accent,
+                    ),
+                  )
+                else
+                  SizedBox(height: topPad),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      IndexedStack(
+                        index: tm.activeIndex,
+                        children: [
+                          for (final t in tm.tabs)
                           PrivacyWebView(
                             key: ValueKey(t.id),
+                            tabId: t.id,
                             tab: t,
+                            autoWipe: _autoWipeEnabled,
                             onWindowOpen: _onWindowOpen,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
@@ -349,136 +393,186 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                               _controllers[t.id] = c;
                             },
                           ),
-                      ],
-                    ),
-                    if (showHome)
-                      _SafariStartPage(onOpenBookmark: _openBookmark),
-                    if (_showTabs)
-                      _TabsOverlay(
-                        manager: tm,
-                        onSelect: (i) {
-                          tm.select(i);
-                          _addressCtrl.text = tm.active.isBlank
-                              ? ''
-                              : tm.active.addressText;
-                          setState(() => _showTabs = false);
-                        },
-                        onClose: (i) {
-                          final id = tm.tabs[i].id;
-                          final ctrl = _controllers.remove(id);
-                          try {
-                            ctrl?.dispose();
-                          } catch (_) {}
-                          tm.closeTab(i);
-                          _addressCtrl.text = tm.active.isBlank
-                              ? ''
-                              : tm.active.addressText;
-                          setState(() {});
-                        },
-                        onDone: () => setState(() => _showTabs = false),
-                        onAdd: () {
-                          if (tm.addTab()) {
-                            _addressCtrl.clear();
+                        ],
+                      ),
+                      if (showHome)
+                        _SafariStartPage(onOpenBookmark: _openBookmark),
+                      if (_showTabs)
+                        _TabsOverlay(
+                          manager: tm,
+                          onSelect: (i) {
+                            tm.select(i);
+                            _addressCtrl.text = tm.active.isBlank
+                                ? ''
+                                : tm.active.addressText;
                             setState(() => _showTabs = false);
-                          }
-                        },
-                      ),
-                  ],
+                          },
+                          onClose: (i) {
+                            final id = tm.tabs[i].id;
+                            final ctrl = _controllers.remove(id);
+                            try {
+                              ctrl?.dispose();
+                            } catch (_) {}
+                            tm.closeTab(i);
+                            _addressCtrl.text = tm.active.isBlank
+                                ? ''
+                                : tm.active.addressText;
+                            setState(() {});
+                          },
+                          onDone: () => setState(() => _showTabs = false),
+                          onAdd: () {
+                            if (tm.addTab()) {
+                              _addressCtrl.clear();
+                              setState(() => _showTabs = false);
+                            }
+                          },
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-              // Safari bottom chrome
-              Material(
-                color: _S.bar,
-                elevation: 0,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Divider(
-                      height: 0.5,
-                      thickness: 0.5,
-                      color: Color(0x33FFFFFF),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                      child: _AddressCapsule(
-                        controller: _addressCtrl,
-                        focusNode: _addressFocus,
-                        displayHost: _displayHost(tab),
-                        isBlank: tab.isBlank,
-                        isLoading: tab.isLoading,
-                        onSubmit: _go,
-                        onReload: () => _activeController?.reload(),
-                        onStop: () => _activeController?.stopLoading(),
+                // Safari bottom chrome
+                Material(
+                  color: _S.bar,
+                  elevation: 0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Divider(
+                        height: 0.5,
+                        thickness: 0.5,
+                        color: Color(0x33FFFFFF),
                       ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(4, 0, 4, 4 + bottomPad),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _BarIcon(
-                            icon: Icons.chevron_left_rounded,
-                            enabled: tab.canGoBack,
-                            onTap: () => _activeController?.goBack(),
-                          ),
-                          _BarIcon(
-                            icon: Icons.chevron_right_rounded,
-                            enabled: tab.canGoForward,
-                            onTap: () => _activeController?.goForward(),
-                          ),
-                          _BarIcon(
-                            icon: Icons.bookmark_border_rounded,
-                            onTap: _showBookmarks,
-                          ),
-                          _BarIcon(
-                            icon: Icons.ios_share_rounded,
-                            onTap: () {
-                              final u = tab.isBlank ? null : tab.url;
-                              if (u == null || u.isEmpty) return;
-                              Clipboard.setData(ClipboardData(text: u));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('链接已复制'),
-                                  duration: Duration(seconds: 1),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
-                            },
-                          ),
-                          _BarIcon(
-                            icon: Icons.copy_all_outlined,
-                            badge: '${tm.tabs.length}',
-                            onTap: () =>
-                                setState(() => _showTabs = !_showTabs),
-                          ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                        child: _AddressCapsule(
+                          controller: _addressCtrl,
+                          focusNode: _addressFocus,
+                          displayHost: _displayHost(tab),
+                          isBlank: tab.isBlank,
+                          isLoading: tab.isLoading,
+                          onSubmit: _go,
+                          onReload: () => _activeController?.reload(),
+                          onStop: () => _activeController?.stopLoading(),
+                        ),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(4, 0, 4, 4 + bottomPad),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _BarIcon(
+                              icon: Icons.chevron_left_rounded,
+                              enabled: tab.canGoBack,
+                              onTap: () => _activeController?.goBack(),
+                            ),
+                            _BarIcon(
+                              icon: Icons.chevron_right_rounded,
+                              enabled: tab.canGoForward,
+                              onTap: () => _activeController?.goForward(),
+                            ),
+                            _BarIcon(
+                              icon: Icons.bookmark_border_rounded,
+                              onTap: _showBookmarks,
+                            ),
+                            _BarIcon(
+                              icon: Icons.ios_share_rounded,
+                              onTap: () {
+                                final u = tab.isBlank ? null : tab.url;
+                                if (u == null || u.isEmpty) return;
+                                Clipboard.setData(ClipboardData(text: u));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('链接已复制'),
+                                    duration: Duration(seconds: 1),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              },
+                            ),
+                            _BarIcon(
+                              icon: Icons.copy_all_outlined,
+                              badge: '${tm.tabs.length}',
+                              onTap: () =>
+                                  setState(() => _showTabs = !_showTabs),
+                            ),
                           _BarIcon(
                             icon: Icons.delete_outline_rounded,
                             color: _S.danger,
                             onTap: _confirmReset,
                           ),
-                        ],
+                          _BarIcon(
+                            icon: Icons.settings_outlined,
+                            onTap: _openSettings,
+                          ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
           if (_resetting)
-            const ColoredBox(
-              color: Color(0xCC000000),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: _S.accent),
-                    SizedBox(height: 16),
-                    Text('正在清除…', style: TextStyle(color: Colors.white70)),
-                  ],
-                ),
+            const _ResettingOverlay(),
+        ],
+      ),
+    );
+  }
+}
+
+/// Full-screen splash shown during cold-start (looks like a fresh launch).
+class _ColdStartSplash extends StatelessWidget {
+  const _ColdStartSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: _S.bg,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: _S.accent, width: 5),
+              ),
+              child: const Icon(
+                Icons.travel_explore_rounded,
+                color: _S.accent,
+                size: 30,
               ),
             ),
-        ],
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(
+              color: _S.accent,
+              strokeWidth: 2,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ResettingOverlay extends StatelessWidget {
+  const _ResettingOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return const ColoredBox(
+      color: Color(0xCC000000),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: _S.accent),
+            SizedBox(height: 16),
+            Text('正在清除…', style: TextStyle(color: Colors.white70)),
+          ],
+        ),
       ),
     );
   }

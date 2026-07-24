@@ -11,11 +11,24 @@ class TabManager extends ChangeNotifier {
   final List<BrowserTabModel> _tabs = [];
   int _activeIndex = 0;
   int _seq = 0;
+  bool _coldStartPending = false;
 
   List<BrowserTabModel> get tabs => List.unmodifiable(_tabs);
   int get activeIndex => _activeIndex;
   BrowserTabModel get active => _tabs[_activeIndex];
   bool get canAdd => _tabs.length < maxTabs;
+  bool get coldStartPending => _coldStartPending;
+
+  void markColdStartPending() {
+    _coldStartPending = true;
+    notifyListeners();
+  }
+
+  void clearColdStartPending() {
+    if (!_coldStartPending) return;
+    _coldStartPending = false;
+    notifyListeners();
+  }
 
   String _nextId() {
     _seq += 1;
@@ -73,7 +86,8 @@ class TabManager extends ChangeNotifier {
     return addTab(url: url);
   }
 
-  /// @deprecated use [openInNewTabForeground]
+  /// @use [openInNewTabForeground] instead
+  @Deprecated('Use openInNewTabForeground instead')
   bool openInBackground(String url) => openInNewTabForeground(url);
 
   void closeTab(int index) {

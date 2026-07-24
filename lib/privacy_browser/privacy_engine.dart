@@ -67,13 +67,19 @@ class PrivacyEngine {
     try {
       await InAppWebViewController.clearAllCache();
     } catch (_) {}
+    await _clearClipboard();
+  }
+
+  static Future<void> _clearClipboard() async {
     try {
-      final data = await Clipboard.getData(Clipboard.kTextPlain);
-      if (data != null && data.text != null && data.text!.isNotEmpty) {
-        await Clipboard.setData(const ClipboardData(text: ' '));
+      final hasData = await Clipboard.hasStrings();
+      if (hasData) {
+        await Clipboard.setData(const ClipboardData(text: ''));
       }
     } catch (_) {}
   }
+
+  static Future<SharedPreferences> prefs() => SharedPreferences.getInstance();
 
   static Future<void> _wipeFlutterPrefs() async {
     try {
