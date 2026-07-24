@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -110,6 +111,68 @@ class _PopupChromeState extends State<_PopupChrome> {
     userAgent: _randomUA(),
   );
 
+  static const _antiFingerprint = r'''
+(function(){
+  if (window.__pbAntiFinger) return;
+  window.__pbAntiFinger = true;
+
+  try {
+    Object.defineProperty(screen, 'width', { get: () => 1920 });
+    Object.defineProperty(screen, 'height', { get: () => 1080 });
+    Object.defineProperty(screen, 'availWidth', { get: () => 1920 });
+    Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
+    Object.defineProperty(window, 'innerWidth', { get: () => 1920 });
+    Object.defineProperty(window, 'innerHeight', { get: () => 1040 });
+    Object.defineProperty(window, 'outerWidth', { get: () => 1920 });
+    Object.defineProperty(window, 'outerHeight', { get: () => 1040 });
+    Object.defineProperty(window, 'devicePixelRatio', { get: () => 1 });
+  } catch(e){}
+
+  try {
+    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+  } catch(e){}
+
+  try {
+    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+  } catch(e){}
+
+  try {
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+  } catch(e){}
+
+  try {
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+  } catch(e){}
+
+  try {
+    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function() {
+      const blank = document.createElement('canvas');
+      blank.width = this.width;
+      blank.height = this.height;
+      return origToDataURL.call(blank);
+    };
+
+    const origToBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function() {
+      const blank = document.createElement('canvas');
+      blank.width = this.width;
+      blank.height = this.height;
+      return origToBlob.call(blank);
+    };
+  } catch(e){}
+
+  try {
+    const origGetParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(param) {
+      if (param === 37445) return 'Google Inc.';
+      if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)';
+      return origGetParameter.call(this, param);
+    };
+  } catch(e){}
+})();
+''';
+
   static const _blankHtml = '''
 <!DOCTYPE html><html><head>
 <meta charset="utf-8"/>
@@ -117,7 +180,11 @@ class _PopupChromeState extends State<_PopupChrome> {
 <title></title>
 <style>
   body{margin:0;background:#000;}
-</style></head><body></body></html>
+</style>
+<script>
+${_antiFingerprint}
+</script>
+</head><body></body></html>
 ''';
 
   @override
@@ -171,6 +238,13 @@ class _PopupChromeState extends State<_PopupChrome> {
     } catch (_) {}
     super.dispose();
   }
+
+  UnmodifiableListView<UserScript> get _userScripts => UnmodifiableListView([
+        UserScript(
+          source: _antiFingerprint,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        ),
+                  ]);
 
   @override
   Widget build(BuildContext context) {
@@ -267,6 +341,10 @@ class _PopupChromeState extends State<_PopupChrome> {
                           ? null
                           : URLRequest(url: WebUri(widget.initialUrl)),
                       initialSettings: _privacySettings,
+                      initialUserScripts: _userScripts,
+                      onWebViewCreated: (c) {
+                        _controller = c;
+                      },
                       onWebViewCreated: (c) {
                         _controller = c;
                       },

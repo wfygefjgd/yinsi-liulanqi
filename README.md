@@ -1,4 +1,4 @@
-# 隐私浏览器（简洁 1.0.10）
+# 隐私浏览器（简洁 1.0.11）
 
 classic 纯净行为 + 必要 window.open 弹窗；后台只清数据不杀进程。
 
@@ -8,7 +8,7 @@ https://github.com/wfygefjgd/yinsi-liulanqi/releases
 
 - **显示名**: 隐私浏览器
 - **Bundle ID**: `com.tongyong.browser`
-- **版本**: 1.0.10 (Build 35)
+- **版本**: 1.0.11 (Build 36)
 - **IPA**: `Tongyong-Browser-iOS.ipa`
 
 ## 功能
@@ -58,6 +58,18 @@ flutter build ios --release --no-codesign
 ```
 
 ## 更新日志
+
+### v1.0.11 (Build 36) — 反设备指纹
+
+**核心变更**：注入反指纹脚本，伪装成桌面浏览器。
+
+- **屏幕指纹防护**：伪装分辨率为 1920×1080 桌面尺寸
+- **平台伪装**：`navigator.platform` 改为 "MacIntel"
+- **触摸点隐藏**：`navigator.maxTouchPoints` 改为 0
+- **硬件伪装**：CPU 核心数改为 8，内存改为 8GB
+- **Canvas 指纹防护**：返回空白图像，阻止画布指纹
+- **WebGL 指纹防护**：伪装为 Intel UHD Graphics 630 桌面显卡
+- **弹窗同步**：弹窗 WebView 同样应用反指纹防护
 
 ### v1.0.10 (Build 35) — 隐私强化与 Bug 修复
 

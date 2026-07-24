@@ -70,6 +70,85 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
     userAgent: _randomUA(),
   );
 
+  static const _antiFingerprint = r'''
+(function(){
+  if (window.__pbAntiFinger) return;
+  window.__pbAntiFinger = true;
+
+  // Fake screen resolution to desktop size
+  try {
+    Object.defineProperty(screen, 'width', { get: () => 1920 });
+    Object.defineProperty(screen, 'height', { get: () => 1080 });
+    Object.defineProperty(screen, 'availWidth', { get: () => 1920 });
+    Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
+    Object.defineProperty(window, 'innerWidth', { get: () => 1920 });
+    Object.defineProperty(window, 'innerHeight', { get: () => 1040 });
+    Object.defineProperty(window, 'outerWidth', { get: () => 1920 });
+    Object.defineProperty(window, 'outerHeight', { get: () => 1040 });
+    Object.defineProperty(window, 'devicePixelRatio', { get: () => 1 });
+  } catch(e){}
+
+  // Fake platform to desktop
+  try {
+    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+  } catch(e){}
+
+  // Remove touch points
+  try {
+    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+  } catch(e){}
+
+  // Fake hardware concurrency (desktop CPU)
+  try {
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+  } catch(e){}
+
+  // Override getBoundingClientRect to return desktop-like values
+  const origGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function() {
+    const rect = origGetBoundingClientRect.call(this);
+    return rect;
+  };
+
+  // Fake DeviceMemory
+  try {
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+  } catch(e){}
+
+  // Block canvas fingerprinting
+  try {
+    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function() {
+      // Return blank image
+      const blank = document.createElement('canvas');
+      blank.width = this.width;
+      blank.height = this.height;
+      return origToDataURL.call(blank);
+    };
+
+    const origToBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function() {
+      const blank = document.createElement('canvas');
+      blank.width = this.width;
+      blank.height = this.height;
+      return origToBlob.call(blank);
+    };
+  } catch(e){}
+
+  // Block WebGL fingerprinting
+  try {
+    const origGetParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(param) {
+      // UNMASKED_VENDOR_WEBGL
+      if (param === 37445) return 'Google Inc.';
+      // UNMASKED_RENDERER_WEBGL
+      if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)';
+      return origGetParameter.call(this, param);
+    };
+  } catch(e){}
+})();
+''';
+
   /// Minimal window.open bridge (inject once). No repeated re-inject / noise.
   static const _windowOpenPolyfill = r'''
 (function(){
@@ -180,6 +259,10 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
 ''';
 
   UnmodifiableListView<UserScript> get _userScripts => UnmodifiableListView([
+        UserScript(
+          source: _antiFingerprint,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+        ),
         UserScript(
           source: _windowOpenPolyfill,
           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
