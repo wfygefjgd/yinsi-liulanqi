@@ -29,8 +29,8 @@ import WebKit
           result(nil)
         }
       case "exitApp":
-        // Snappy manual identity reset
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+        // Kill process so next launch is cold (no leftover WebKit process state)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
           exit(0)
         }
         result(nil)
@@ -42,12 +42,13 @@ import WebKit
 }
 
 enum PrivacyNativeWipe {
-  /// Keep Application Documents/durable (bookmarks + settings).
+  /// Keep only Application Documents/durable (built-in bookmark list if any).
   private static let durableFolderName = "durable"
 
   static func run(completion: @escaping () -> Void) {
     let group = DispatchGroup()
 
+    // 1) Default website data store (cookies, localStorage, indexedDB, service workers…)
     group.enter()
     let types = WKWebsiteDataStore.allWebsiteDataTypes()
     WKWebsiteDataStore.default().removeData(
@@ -57,17 +58,39 @@ enum PrivacyNativeWipe {
       group.leave()
     }
 
+    // 2) Non-persistent store if ever used
+    group.enter()
+    let nonPersist = WKWebsiteDataStore.nonPersistent()
+    nonPersist.removeData(
+      ofTypes: types,
+      modifiedSince: Date(timeIntervalSince1970: 0)
+    ) {
+      group.leave()
+    }
+
+    // 3) Process pool cannot be fully reset, but clear shared cookie/cache layers
     HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
     HTTPCookieStorage.shared.removeCookies(since: .distantPast)
     URLCache.shared.removeAllCachedResponses()
     URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0, diskPath: nil)
+    URLSession.shared.reset {}
 
     wipeSandboxFiles()
     wipeUserDefaults()
     wipeKeychain()
+    // Second filesystem pass after short delay (WebKit async writers)
+    DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.15) {
+      wipeSandboxFiles()
+    }
 
     group.notify(queue: .main) {
-      completion()
+      // Extra default store pass
+      WKWebsiteDataStore.default().removeData(
+        ofTypes: types,
+        modifiedSince: Date(timeIntervalSince1970: 0)
+      ) {
+        completion()
+      }
     }
   }
 
@@ -80,6 +103,8 @@ enum PrivacyNativeWipe {
       home.appendingPathComponent("Library/Caches"),
       home.appendingPathComponent("Library/HTTPStorages"),
       home.appendingPathComponent("Library/Application Support"),
+      home.appendingPathComponent("Library/Preferences"),
+      home.appendingPathComponent("Library/SplashBoard"),
       home.appendingPathComponent("tmp"),
       URL(fileURLWithPath: NSTemporaryDirectory()),
       home.appendingPathComponent("Documents"),
@@ -87,6 +112,9 @@ enum PrivacyNativeWipe {
     for url in targets {
       wipeDirectoryContents(url, fileManager: fm, preserveName: durableFolderName)
     }
+    // Known cookie file
+    let cookieFile = home.appendingPathComponent("Library/Cookies/Cookies.binarycookies")
+    try? fm.removeItem(at: cookieFile)
   }
 
   private static func wipeDirectoryContents(
@@ -106,6 +134,19 @@ enum PrivacyNativeWipe {
       if let preserveName, item.lastPathComponent == preserveName {
         continue
       }
+      // Preserve nested durable under Documents or app_flutter
+      if let preserveName, item.hasDirectoryPath {
+        let nested = item.appendingPathComponent(preserveName)
+        if fm.fileExists(atPath: nested.path) {
+          // wipe siblings only
+          if let kids = try? fm.contentsOfDirectory(at: item, includingPropertiesForKeys: nil) {
+            for kid in kids where kid.lastPathComponent != preserveName {
+              try? fm.removeItem(at: kid)
+            }
+          }
+          continue
+        }
+      }
       try? fm.removeItem(at: item)
     }
   }
@@ -113,6 +154,8 @@ enum PrivacyNativeWipe {
   private static func wipeUserDefaults() {
     if let bundleId = Bundle.main.bundleIdentifier {
       UserDefaults.standard.removePersistentDomain(forName: bundleId)
+      // Suite if any
+      UserDefaults(suiteName: bundleId)?.removePersistentDomain(forName: bundleId)
     }
     for key in UserDefaults.standard.dictionaryRepresentation().keys {
       UserDefaults.standard.removeObject(forKey: key)

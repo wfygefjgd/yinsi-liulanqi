@@ -27,7 +27,7 @@ class MainActivity : FlutterActivity() {
                         window.decorView.postDelayed({
                             finishAndRemoveTask()
                             Process.killProcess(Process.myPid())
-                        }, 120)
+                        }, 80)
                     }
                     else -> result.notImplemented()
                 }
@@ -49,6 +49,8 @@ class MainActivity : FlutterActivity() {
                 clearCache(true)
                 clearFormData()
                 clearHistory()
+                clearSslPreferences()
+                clearMatches()
                 destroy()
             }
         } catch (_: Exception) {
@@ -57,15 +59,16 @@ class MainActivity : FlutterActivity() {
         deleteRecursivelyPreserve(cacheDir, null)
         deleteRecursivelyPreserve(codeCacheDir, null)
         deleteRecursivelyPreserve(externalCacheDir, null)
-        // Keep app_flutter/durable or filesDir/durable bookmarks.
         deleteRecursivelyPreserve(filesDir, durableName)
         deleteRecursivelyPreserve(getDir("webview", MODE_PRIVATE), null)
         deleteRecursivelyPreserve(getDir("app_webview", MODE_PRIVATE), null)
         deleteRecursivelyPreserve(File(applicationInfo.dataDir, "app_webview"), null)
+        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "app_flutter"), durableName)
         deleteRecursivelyPreserve(File(applicationInfo.dataDir, "cache"), null)
         deleteRecursivelyPreserve(File(applicationInfo.dataDir, "code_cache"), null)
+        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "databases"), null)
+        deleteRecursivelyPreserve(File(applicationInfo.dataDir, "no_backup"), null)
 
-        // Clear flutter prefs except we store bookmarks in files, not prefs.
         getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
             .edit()
             .clear()
@@ -82,7 +85,6 @@ class MainActivity : FlutterActivity() {
                 if (preserveChildName != null && child.name == preserveChildName) {
                     return@forEach
                 }
-                // Also preserve nested path .../app_flutter/durable or documents/durable
                 if (preserveChildName != null && child.isDirectory) {
                     val durable = File(child, preserveChildName)
                     if (durable.exists()) {
@@ -96,11 +98,8 @@ class MainActivity : FlutterActivity() {
                 }
                 deleteRecursivelyPreserve(child, null)
             }
-            // do not delete root filesDir if we preserved children
             if (preserveChildName == null) {
                 file.delete()
-            } else {
-                // leave directory
             }
         } else {
             file.delete()

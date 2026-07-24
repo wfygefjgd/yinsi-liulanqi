@@ -145,21 +145,22 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.7
-          name: 隐私浏览器 iOS v1.0.7
+          tag_name: v1.0.8
+          name: 隐私浏览器 iOS v1.0.8
           body: |
-            ## 隐私浏览器 · 弹窗不顶掉原页
+            ## 隐私浏览器 · 核清更彻底
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.7 · **Build**: 32
+            - **Version**: 1.0.8 · **Build**: 33
 
-            ### 修复
-            - `window.open` 用 **Overlay 浮层**，不再 push 全屏路由顶掉原 WebView
-            - 弹窗空白页有「请稍候」提示，不再只有关闭键黑屏
-            - `location.replace` 只加载进弹窗；关闭后原页仍在
-            - 防止 onCreateWindow 把 about:blank 加载进主页面
+            ### 修复（站点认成同一环境）
+            - 进后台：**彻底清 WebKit 数据 + 杀进程**（与最初版一致的冷启动）
+            - 原生双遍清理 Cookie/LocalStorage/缓存/Keychain
+            - 冷启动再清一遍残留
+            - 保留 window.open 方案二（弹窗不占原页）
+            - 仅保留 durable 内置书签目录
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

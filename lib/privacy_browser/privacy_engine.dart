@@ -5,7 +5,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Extreme privacy wipe: WebView data + sandbox + prefs + optional cold exit.
+/// Extreme privacy wipe — match original thorough clean + process death.
 class PrivacyEngine {
   PrivacyEngine._();
 
@@ -20,10 +20,13 @@ class PrivacyEngine {
       await _wipeFlutterPrefs();
       await _wipeAppDirs();
       try {
+        // Wait for native WebKit / keychain / sandbox wipe to finish
         await _channel.invokeMethod<void>('nuclearWipe');
       } on PlatformException {
       } on MissingPluginException {
       }
+      // Second pass web layer after native (some data reappears)
+      await _wipeWebLayer();
       if (exitAfter) {
         await _exitApp();
       }
@@ -36,7 +39,13 @@ class PrivacyEngine {
     await nuclearWipe(exitAfter: false);
   }
 
+  /// Full reset: wipe + kill process (next open is cold identity).
   static Future<void> resetAndRelaunch() async {
+    await nuclearWipe(exitAfter: true);
+  }
+
+  /// Background leave: same thorough wipe + kill (like oldest build).
+  static Future<void> wipeOnBackground() async {
     await nuclearWipe(exitAfter: true);
   }
 
@@ -46,6 +55,11 @@ class PrivacyEngine {
     } catch (_) {}
     try {
       await InAppWebViewController.clearAllCache();
+    } catch (_) {}
+    try {
+      // Session cookies / storage extras if API available
+      await CookieManager.instance().deleteCookies(url: WebUri('https://jiurelay.com'));
+      await CookieManager.instance().deleteCookies(url: WebUri('https://www.jiurelay.com'));
     } catch (_) {}
   }
 
@@ -75,6 +89,11 @@ class PrivacyEngine {
       if (dir == null || !await dir.exists()) continue;
       try {
         await for (final entity in dir.list(followLinks: false)) {
+          // Only keep hard-coded bookmarks folder name if present
+          final name = entity.uri.pathSegments.isNotEmpty
+              ? entity.uri.pathSegments.last
+              : entity.path.split(Platform.pathSeparator).last;
+          if (name == 'durable') continue;
           try {
             await entity.delete(recursive: true);
           } catch (_) {}
@@ -89,5 +108,8 @@ class PrivacyEngine {
     } catch (_) {
       exit(0);
     }
+    // Fallback if native ignores
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    exit(0);
   }
 }

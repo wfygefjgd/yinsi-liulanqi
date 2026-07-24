@@ -108,14 +108,20 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   }
 
   Future<void> _silentBackgroundWipe() async {
+    // Destroy WebViews first so they release storage handles
     _controllers.clear();
-    await PrivacyEngine.nuclearWipe(exitAfter: false);
-    if (!mounted) return;
-    context.read<TabManager>().hardResetTabs();
-    _addressCtrl.clear();
+    if (mounted) {
+      try {
+        context.read<TabManager>().hardResetTabs();
+      } catch (_) {}
+      _addressCtrl.clear();
+    }
+    // Thorough wipe + kill process (same cold identity as oldest build)
+    await PrivacyEngine.wipeOnBackground();
   }
 
   void _rebuildAfterWipe() {
+    // Process usually already exited; if still alive, empty UI
     if (!mounted) return;
     setState(() {});
     final tab = context.read<TabManager>().active;

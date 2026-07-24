@@ -12,6 +12,7 @@ Future<void> main() async {
     await InAppWebViewController.setWebContentsDebuggingEnabled(false);
   }
 
+  // Cold start: wipe leftovers so site fingerprints don't carry over
   await PrivacyEngine.wipeOnLaunch();
   runApp(const PrivacyBrowserApp());
 }
