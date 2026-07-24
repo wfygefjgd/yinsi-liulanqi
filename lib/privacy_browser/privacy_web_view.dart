@@ -385,7 +385,8 @@ class _PrivacyWebViewState extends State<PrivacyWebView>
         if (url.isEmpty) url = 'about:blank';
         final id = ++_windowSeq;
         _openPopup(url, id);
-        return true; // we handle it; cancel default into same view
+        // false = cancel default (do NOT load into this WebView / do not require windowId child)
+        return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
         // Always allow normal in-page navigation.
