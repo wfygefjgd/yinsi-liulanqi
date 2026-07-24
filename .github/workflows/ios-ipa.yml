@@ -145,22 +145,24 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.9
-          name: 隐私浏览器 iOS v1.0.9
+          tag_name: v1.0.11
+          name: 隐私浏览器 iOS v1.0.11
           body: |
-            ## 隐私浏览器 · 回归 classic 纯净
+            ## 隐私浏览器 · 反设备指纹
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.9 · **Build**: 34
+            - **Version**: 1.0.11 · **Build**: 36
 
-            ### 变更（针对「环境变化过于频繁」）
-            - 进后台：只清数据 + 关标签，**不杀进程**（classic）
-            - 弹窗 WebView 与主页同等无痕（incognito / 无缓存 / 无第三方 Cookie）
-            - 去掉 durable 保留；原生全量删目录
-            - window.open polyfill 仅注入一次，去掉反复 re-inject
-            - 媒体自动播放策略回到 classic（需手势）
+            ### 新增：反设备指纹
+            - 屏幕指纹防护：伪装 1920×1080 桌面分辨率
+            - 平台伪装：MacIntel（非 iPhone）
+            - 触摸点隐藏：maxTouchPoints = 0
+            - 硬件伪装：8核CPU / 8GB内存
+            - Canvas 指纹防护：返回空白图像
+            - WebGL 指纹防护：伪装 Intel UHD 630
+            - 弹窗 WebView 同步防护
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`
