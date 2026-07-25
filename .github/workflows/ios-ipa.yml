@@ -145,17 +145,27 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.16
-          name: "隐私浏览器 iOS v1.0.16"
+          tag_name: v1.0.17
+          name: "隐私浏览器 iOS v1.0.17"
           body: |
             ## 隐私浏览器 · 优雅的暴力
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.16 · **Build**: 41
+            - **Version**: 1.0.17 · **Build**: 42
 
-            ### 核心升级：真·冷启动机制
+            ### 本次更新
+
+            **修复弹窗体验**
+            - 修复弹窗内点击链接时原页面也跟随跳转的问题
+            - 弹窗内的新窗口请求现在会被优雅地阻止
+            - 主页面保持不动，体验更流畅
+
+            **版本号同步**
+            - 设置页面版本号现在与发布版本一致
+
+            ### 核心机制：真·冷启动
 
             **表面优雅**
             - 切后台时平滑过渡，看不出任何异常

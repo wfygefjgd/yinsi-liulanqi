@@ -470,10 +470,7 @@ ${_antiFingerprint}
                         }
                       },
                       onCreateWindow: (c, a) async {
-                        final u = a.request.url;
-                        if (u != null) {
-                          await c.loadUrl(urlRequest: URLRequest(url: u));
-                        }
+                        // Block nested window.open in popups to prevent jumping
                         return false;
                       },
                       shouldOverrideUrlLoading: (c, a) async {
