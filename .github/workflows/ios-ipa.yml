@@ -145,29 +145,18 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.12
-          name: "隐私浏览器 iOS v1.0.12"
+          tag_name: v1.0.13
+          name: "隐私浏览器 iOS v1.0.13"
           body: |
-            ## 隐私浏览器 · 后台自动清理开关
+            ## 隐私浏览器 · 更新书签
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.12 · **Build**: 37
+            - **Version**: 1.0.13 · **Build**: 38
 
-            ### 新增：后台自动清理开关
-            - 底部工具栏新增齿轮图标进入设置
-            - 新增"退到后台时自动清理"开关（默认开启）
-            - **开启时**（默认）：离开浏览器自动清除所有数据并模拟冷启动
-            - **关闭时**：表现为正常浏览器（保留 Cookie、缓存、DOM 存储）
-            - 回前台时自动刷新偏好设置
-
-            ### 修复
-            - 修复 WebView Key 不匹配导致状态丢失
-            - 修复 _activeController 可能访问已释放的控制器
-            - 修复剪贴板清理在 iOS 上不可靠的问题
-            - 弹窗 WebView 现在也注入 window.open polyfill
-            - 将冷启动标记移至 TabManager，跨 widget 重建持久化
+            ### 更新
+            - 更新 Jiurelay 书签 URL 为主页地址
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`
