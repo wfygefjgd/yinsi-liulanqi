@@ -426,13 +426,21 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        var url = createWindowAction.request.url?.toString() ?? '';
-        if (url.isEmpty) url = 'about:blank';
+        // 阻止原页面跳转，直接弹出新窗口
+        final url = createWindowAction.request.url?.toString() ?? 'about:blank';
         final id = ++_windowSeq;
         _openPopup(url, id);
-        return false;
+        return true; // 返回 true 阻止原页面加载
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
+        final request = navigationAction.request;
+        final isWindowOpen = navigationAction.isForMainFrame == false;
+
+        // 如果是 window.open 触发的，阻止原页面加载
+        if (isWindowOpen) {
+          return NavigationActionPolicy.CANCEL;
+        }
+
         return NavigationActionPolicy.ALLOW;
       },
     );

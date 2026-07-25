@@ -178,25 +178,50 @@ enum PrivacyNativeWipe {
 
   // 霸道操作 1: 清除进程环境变量和内存缓存
   private static func wipeProcessInfo() {
-    // 清理 ProcessInfo 环境变量（某些追踪会在这里缓存）
-    let processInfo = ProcessInfo.processInfo
-    _ = processInfo.environment // 触发访问但不保存
-
-    // 清空 URLCache（系统级内存缓存）
+    // 清空所有 NSCache 实例（系统级内存缓存）
     URLCache.shared.removeAllCachedResponses()
     URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0, directory: nil)
+
+    // 清空图片缓存（如果存在）
+    if #available(iOS 13.0, *) {
+      URLSession.shared.configuration.urlCache = nil
+    }
+
+    // 清理系统剪贴板（防止跨应用追踪）
+    UIPasteboard.general.items = []
+    if #available(iOS 10.0, *) {
+      UIPasteboard.general.setItems([], options: [:])
+    }
   }
 
-  // 霸道操作 2: 重置网络会话状态
+  // 霸道操作 2: 重置网络会话状态 + 强制清理所有持久化连接
   private static func resetNetworkState() {
-    // 强制重置所有 URLSession 配置
+    // 1. 终止所有活动网络任务
+    URLSession.shared.invalidateAndCancel()
+
+    // 2. 清空所有 Cookie 和缓存
+    HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
+    URLCache.shared.removeAllCachedResponses()
+
+    // 3. 重建无痕会话配置
     let config = URLSessionConfiguration.ephemeral
     config.urlCache = nil
     config.httpCookieStorage = nil
     config.httpCookieAcceptPolicy = .never
     config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    config.httpShouldSetCookies = false
+    config.httpAdditionalHeaders = [:] // 清空所有自定义请求头
 
-    // 清空 DNS 缓存（通过重建会话实现）
-    URLSession(configuration: config).finishTasksAndInvalidate()
+    // 4. 清空 DNS 缓存（iOS 通过重建会话实现）
+    let cleanSession = URLSession(configuration: config)
+    cleanSession.finishTasksAndInvalidate()
+
+    // 5. 强制清理 WKProcessPool（杀掉所有 WebKit 进程）
+    if #available(iOS 14.0, *) {
+      WKWebsiteDataStore.default().removeData(
+        ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(),
+        modifiedSince: .distantPast
+      ) { }
+    }
   }
 }
