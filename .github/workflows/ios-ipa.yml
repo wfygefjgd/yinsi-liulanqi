@@ -145,18 +145,23 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.13
-          name: "隐私浏览器 iOS v1.0.13"
+          tag_name: v1.0.14
+          name: "隐私浏览器 iOS v1.0.14"
           body: |
-            ## 隐私浏览器 · 更新书签
+            ## 隐私浏览器 · 速度与优雅并存
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.13 · **Build**: 38
+            - **Version**: 1.0.14 · **Build**: 39
+
+            ### 重大优化：后台清理机制
+            - **问题**：之前退后台时应用会卡住很久才能被杀掉
+            - **优化**：快速清理关键数据后立即返回，文件深度清理异步执行
+            - **效果**：切后台瞬间完成，系统可立即杀掉进程，回前台流畅无卡顿
 
             ### 更新
-            - 更新 Jiurelay 书签 URL 为主页地址
+            - 更新 Jiurelay 书签为主页地址
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`
