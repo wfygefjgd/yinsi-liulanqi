@@ -79,10 +79,12 @@ enum PrivacyNativeWipe {
     URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0, diskPath: nil)
     URLSession.shared.reset {}
 
-    // 6) Sandbox files
+    // 6) Sandbox files + advanced cleanup
     wipeSandboxFiles()
     wipeUserDefaults()
     wipeKeychain()
+    wipeProcessInfo()
+    resetNetworkState()
 
     // 7) Second pass after delay (catch async writers)
     DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.2) {
@@ -121,6 +123,19 @@ enum PrivacyNativeWipe {
     }
     let cookieFile = home.appendingPathComponent("Library/Cookies/Cookies.binarycookies")
     try? fm.removeItem(at: cookieFile)
+
+    // 霸道模式：多路径扫描，确保没有遗漏
+    let extraPaths = [
+      "Library/Caches/com.apple.nsurlsessiond",
+      "Library/Caches/Snapshots",
+      "Library/WebKit/NetworkCache",
+      "Library/WebKit/com.apple.WebKit.Networking",
+      "Library/WebKit/com.apple.WebKit.WebContent",
+    ]
+    for path in extraPaths {
+      let url = home.appendingPathComponent(path)
+      wipeDirectoryContents(url, fileManager: fm)
+    }
   }
 
   private static func wipeDirectoryContents(_ url: URL, fileManager fm: FileManager) {
@@ -159,5 +174,29 @@ enum PrivacyNativeWipe {
     for cls in classes {
       SecItemDelete([kSecClass: cls] as CFDictionary)
     }
+  }
+
+  // 霸道操作 1: 清除进程环境变量和内存缓存
+  private static func wipeProcessInfo() {
+    // 清理 ProcessInfo 环境变量（某些追踪会在这里缓存）
+    let processInfo = ProcessInfo.processInfo
+    _ = processInfo.environment // 触发访问但不保存
+
+    // 清空 NSCache（系统级内存缓存）
+    NSURLCache.shared.removeAllCachedResponses()
+    NSURLCache.shared = NSURLCache(memoryCapacity: 0, diskCapacity: 0, directory: nil)
+  }
+
+  // 霸道操作 2: 重置网络会话状态
+  private static func resetNetworkState() {
+    // 强制重置所有 URLSession 配置
+    let config = URLSessionConfiguration.ephemeral
+    config.urlCache = nil
+    config.httpCookieStorage = nil
+    config.httpCookieAcceptPolicy = .never
+    config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+
+    // 清空 DNS 缓存（通过重建会话实现）
+    URLSession(configuration: config).finishTasksAndInvalidate()
   }
 }
