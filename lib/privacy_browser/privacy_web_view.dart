@@ -17,6 +17,7 @@ class PrivacyWebView extends StatefulWidget {
     required this.onChanged,
     required this.onControllerReady,
     this.onWindowOpen,
+    this.onCreateNewTab,
     this.autoWipe = true,
   });
 
@@ -28,6 +29,9 @@ class PrivacyWebView extends StatefulWidget {
   /// Show popup UI for window.open(url) — must NOT navigate this WebView.
   final void Function(String url, int windowId, VoidCallback onClosed)?
       onWindowOpen;
+
+  /// Create new tab for window.open(url) — replaces popup window behavior.
+  final void Function(String url)? onCreateNewTab;
 
   /// When false, use normal (non-incognito) mode — behaves like a regular browser.
   final bool autoWipe;
@@ -426,10 +430,12 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        // 阻止原页面跳转，直接弹出新窗口
+        // 使用标签页系统代替弹窗：原页面保持为"页面 1"，新页面作为"页面 2"打开并自动切换
         final url = createWindowAction.request.url?.toString() ?? 'about:blank';
-        final id = ++_windowSeq;
-        _openPopup(url, id);
+        final createTab = widget.onCreateNewTab;
+        if (createTab != null && url.isNotEmpty && url != 'about:blank') {
+          createTab(url);
+        }
         return true; // 返回 true 阻止原页面加载
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {

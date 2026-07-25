@@ -389,7 +389,10 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             tabId: t.id,
                             tab: t,
                             autoWipe: _autoWipeEnabled,
-                            onWindowOpen: _onWindowOpen,
+                            onCreateNewTab: (url) {
+                              // 创建新标签页并自动切换（原页面保持为"页面 1"，新页面为"页面 2"）
+                              tm.openInNewTabForeground(url);
+                            },
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
