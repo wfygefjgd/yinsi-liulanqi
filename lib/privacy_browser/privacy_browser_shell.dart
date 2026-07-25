@@ -32,7 +32,7 @@ class _Bookmark {
 const List<_Bookmark> kBuiltInBookmarks = [
   _Bookmark(
     title: 'Jiurelay',
-    url: 'https://jiurelay.com/r/JR-UQYJQT',
+    url: 'https://jiurelay.com/',
   ),
 ];
 
