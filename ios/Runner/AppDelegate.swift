@@ -182,9 +182,9 @@ enum PrivacyNativeWipe {
     let processInfo = ProcessInfo.processInfo
     _ = processInfo.environment // 触发访问但不保存
 
-    // 清空 NSCache（系统级内存缓存）
-    NSURLCache.shared.removeAllCachedResponses()
-    NSURLCache.shared = NSURLCache(memoryCapacity: 0, diskCapacity: 0, directory: nil)
+    // 清空 URLCache（系统级内存缓存）
+    URLCache.shared.removeAllCachedResponses()
+    URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0, directory: nil)
   }
 
   // 霸道操作 2: 重置网络会话状态
