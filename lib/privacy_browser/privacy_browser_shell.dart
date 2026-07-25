@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -107,7 +109,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     }
   }
 
-  /// Entering background: if auto-wipe enabled, destroy WebViews + wipe + mark cold-start.
+  /// Entering background: if auto-wipe enabled, destroy WebViews + fast wipe + mark cold-start.
+  /// Returns immediately, deep clean happens in background.
   Future<void> _enterBackground() async {
     final autoWipe = await _isAutoWipeEnabled();
     if (!autoWipe) {
@@ -116,15 +119,16 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     final tm = context.read<TabManager>();
     WindowPopupOverlay.hide(notify: false);
     _disposeControllers();
-    await PrivacyEngine.wipeOnBackground();
     tm.hardResetTabs();
     tm.markColdStartPending();
     if (!mounted) return;
     _addressCtrl.clear();
     setState(() => _showTabs = false);
+    // Fast wipe runs async, app can background immediately
+    unawaited(PrivacyEngine.wipeOnBackground());
   }
 
-  /// On resume: refresh pref, then if auto-wipe enabled and cold-start pending, run cold-start.
+  /// On resume: refresh pref, then if auto-wipe enabled and cold-start pending, show splash briefly.
   Future<void> _onResume() async {
     await _refreshAutoWipePref();
     if (!await _isAutoWipeEnabled()) {
@@ -135,8 +139,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     tm.clearColdStartPending();
     if (_coldStarting) return;
     setState(() => _coldStarting = true);
-    await PrivacyEngine.wipeOnLaunch();
-    tm.hardResetTabs();
+    // Show splash for smooth visual, no blocking wipe
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
     _addressCtrl.clear();
     setState(() {
