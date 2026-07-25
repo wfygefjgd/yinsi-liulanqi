@@ -110,7 +110,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   }
 
   /// Entering background: if auto-wipe enabled, destroy WebViews + fast wipe + mark cold-start.
-  /// Returns immediately, deep clean happens in background.
+  /// Then gracefully exit after brief delay (elegant violence).
   Future<void> _enterBackground() async {
     final autoWipe = await _isAutoWipeEnabled();
     if (!autoWipe) {
@@ -124,23 +124,22 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     if (!mounted) return;
     _addressCtrl.clear();
     setState(() => _showTabs = false);
-    // Fast wipe runs async, app can background immediately
-    unawaited(PrivacyEngine.wipeOnBackground());
+    // Fast wipe, then elegant exit (user won't see the violence)
+    unawaited(PrivacyEngine.wipeAndExit());
   }
 
-  /// On resume: refresh pref, then if auto-wipe enabled and cold-start pending, show splash briefly.
+  /// On resume: refresh pref, always show cold start splash (app was killed).
   Future<void> _onResume() async {
     await _refreshAutoWipePref();
     if (!await _isAutoWipeEnabled()) {
       return;
     }
     final tm = context.read<TabManager>();
-    if (!tm.coldStartPending) return;
     tm.clearColdStartPending();
     if (_coldStarting) return;
     setState(() => _coldStarting = true);
-    // Show splash for smooth visual, no blocking wipe
-    await Future.delayed(const Duration(milliseconds: 300));
+    // Show splash for smooth visual
+    await Future.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
     _addressCtrl.clear();
     setState(() {

@@ -54,9 +54,9 @@ class PrivacyEngine {
     await nuclearWipe(exitAfter: true);
   }
 
-  /// Leave app / background: fast wipe + async deep clean.
-  /// Returns immediately after clearing web layer, dirs cleaned in background.
-  static Future<void> wipeOnBackground() async {
+  /// Leave app / background: fast wipe + elegant exit after brief delay.
+  /// User sees smooth transition, then app kills itself (elegant violence).
+  static Future<void> wipeAndExit() async {
     if (_wiping) return;
     _wiping = true;
     try {
@@ -65,8 +65,11 @@ class PrivacyEngine {
       await _wipeFlutterPrefs();
       // Fire native wipe but don't wait
       unawaited(_channel.invokeMethod<void>('nuclearWipe').catchError((_) {}));
-      // Deep clean dirs in background, don't block return
+      // Deep clean dirs in background
       unawaited(_wipeAppDirs().then((_) => _wipeWebLayer()));
+      // Brief delay so user sees smooth transition, then kill
+      await Future.delayed(const Duration(milliseconds: 150));
+      exit(0);
     } finally {
       _wiping = false;
     }
