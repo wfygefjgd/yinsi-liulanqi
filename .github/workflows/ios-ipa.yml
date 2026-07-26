@@ -145,32 +145,21 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.20
-          name: "隐私浏览器 iOS v1.0.20"
+          tag_name: v1.0.21
+          name: "隐私浏览器 iOS v1.0.21"
           body: |
-            ## 隐私浏览器 · 标签页新窗口 + 稳定性修复
+            ## 隐私浏览器 · 修复原页被一起跳转
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.20 · **Build**: 45
+            - **Version**: 1.0.21 · **Build**: 46
 
-            ### 本次更新
-
-            **window.open 改为浏览器内标签页**
-            - 原页面保留为标签 1，新链接在标签 2 打开并切换过去
-            - 用底部标签面板切换，不再使用外层浮窗
-            - 支持 `window.open` 后续 `location` 导航与 `close`
-
-            **Bug 修复**
-            - 设置「退后台自动清理」开关在 wipe 后不再被误删
-            - 原生延迟清理跳过 Preferences，避免二次抹掉用户偏好
-            - 地址栏在 WebView 未就绪时改为 pendingUrl，不再静默失败
-            - 移除 about:blank 上的错误 goBack
-            - 满标签复用时换新 WebView，避免历史串页
-            - 关闭活动标签回到前一个标签
-            - 拦截 tel:/mailto: 等外链 scheme
-            - 后台 wipe 加锁，避免 paused/hidden 双触发
+            ### 关键修复
+            - **根因**：`supportMultipleWindows: false` 时，window.open / target=_blank 会在**当前标签**里导航，同时我们又新开了标签 → 两个标签变成同一页
+            - **修复**：开启 `supportMultipleWindows`，由 `onCreateWindow` 开新标签且原页不动
+            - **加固**：JS 拦截 `target=_blank` 点击/表单；`targetFrame == null` 的导航取消并转标签
+            - **去重**：polyfill 与原生回调 800ms 内同一 URL 只开一次
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

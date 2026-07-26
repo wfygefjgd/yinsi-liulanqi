@@ -43,6 +43,9 @@ class PrivacyWebView extends StatefulWidget {
 class _PrivacyWebViewState extends State<PrivacyWebView> {
   InAppWebViewController? _controller;
   int _windowSeq = 0;
+  /// Dedupe polyfill + native onCreateWindow for the same click.
+  String? _lastOpenUrl;
+  int _lastOpenMs = 0;
 
   static final _rng = Random();
   static const _iosVersions = ['16_0', '16_1', '16_2', '17_0', '17_1', '17_2', '17_4'];
@@ -59,11 +62,13 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
   InAppWebViewSettings get _settings => InAppWebViewSettings(
     incognito: widget.autoWipe,
     javaScriptEnabled: true,
-    domStorageEnabled: widget.autoWipe ? false : true,
-    databaseEnabled: widget.autoWipe ? false : true,
-    cacheEnabled: widget.autoWipe ? false : true,
+    domStorageEnabled: !widget.autoWipe,
+    databaseEnabled: !widget.autoWipe,
+    cacheEnabled: !widget.autoWipe,
     clearCache: widget.autoWipe,
-    thirdPartyCookiesEnabled: true,
+    // Must be true so window.open / target=_blank hit onCreateWindow
+    // instead of navigating the *current* tab (which caused dual same-URL tabs).
+    thirdPartyCookiesEnabled: !widget.autoWipe,
     mediaPlaybackRequiresUserGesture: true,
     allowsInlineMediaPlayback: true,
     allowsBackForwardNavigationGestures: true,
@@ -74,9 +79,9 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
     loadWithOverviewMode: true,
     transparentBackground: false,
     javaScriptCanOpenWindowsAutomatically: true,
-    supportMultipleWindows: false,
+    supportMultipleWindows: true,
     useShouldOverrideUrlLoading: true,
-    sharedCookiesEnabled: true,
+    sharedCookiesEnabled: !widget.autoWipe,
     userAgent: _randomUA(),
   );
 
@@ -159,11 +164,11 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
 })();
 ''';
 
-  /// Minimal window.open bridge (inject once). No repeated re-inject / noise.
+  /// window.open + target=_blank → Flutter tab only (never navigate opener).
   static const _windowOpenPolyfill = r'''
 (function(){
-  if (window.__pbWinOpenV6) return;
-  window.__pbWinOpenV6 = true;
+  if (window.__pbWinOpenV7) return;
+  window.__pbWinOpenV7 = true;
   window.__pbPopups = window.__pbPopups || {};
 
   function absUrl(u) {
@@ -249,6 +254,15 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
 
   window.open = function(url, name, specs) {
     try {
+      // Same-window targets: do not open a tab, let normal navigation handle.
+      var n = name != null ? String(name) : '';
+      if (n === '_self' || n === '_parent' || n === '_top') {
+        var su = absUrl(url);
+        if (su && su !== 'about:blank') {
+          try { location.href = su; } catch(e){}
+        }
+        return window;
+      }
       var u = (url == null || url === '') ? 'about:blank' : String(url);
       if (u.indexOf('javascript:') === 0) return null;
       u = absUrl(u);
@@ -257,7 +271,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
       var stub = makeStub(id, u);
       try {
         if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
-          window.flutter_inappwebview.callHandler('windowOpen', u, id, name || '');
+          window.flutter_inappwebview.callHandler('windowOpen', u, id, n || '');
         }
       } catch(e){}
       return stub;
@@ -265,6 +279,45 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
       return null;
     }
   };
+
+  // target=_blank links must not navigate the opener tab.
+  document.addEventListener('click', function(e) {
+    try {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var a = t.closest('a');
+      if (!a) return;
+      var tgt = (a.getAttribute('target') || '').toLowerCase();
+      if (tgt !== '_blank' && tgt !== '_new') return;
+      var href = a.href;
+      if (!href || href.indexOf('javascript:') === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      window.open(href, '_blank');
+    } catch(err){}
+  }, true);
+
+  document.addEventListener('submit', function(e) {
+    try {
+      var f = e.target;
+      if (!f || !f.getAttribute) return;
+      var tgt = (f.getAttribute('target') || '').toLowerCase();
+      if (tgt !== '_blank' && tgt !== '_new') return;
+      e.preventDefault();
+      e.stopPropagation();
+      var action = f.action || location.href;
+      var method = (f.method || 'get').toLowerCase();
+      if (method === 'get') {
+        var fd = new FormData(f);
+        var q = new URLSearchParams(fd).toString();
+        var url = action + (action.indexOf('?') >= 0 ? '&' : '?') + q;
+        window.open(url, '_blank');
+      } else {
+        window.open(action, '_blank');
+      }
+    } catch(err){}
+  }, true);
 })();
 ''';
 
@@ -306,8 +359,19 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
     super.dispose();
   }
 
+  bool _isDuplicateOpen(String url) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (_lastOpenUrl == url && (now - _lastOpenMs) < 800) {
+      return true;
+    }
+    _lastOpenUrl = url;
+    _lastOpenMs = now;
+    return false;
+  }
+
   void _openPopup(String url, int id) {
     if (url.isEmpty) url = 'about:blank';
+    if (_isDuplicateOpen(url)) return;
     // Prefer onWindowOpen (tab + PopupRegistry for navigate/close).
     final cb = widget.onWindowOpen;
     if (cb != null) {
@@ -441,25 +505,35 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        // Tab system: keep current page, open as second tab.
+        // New window requested: open as tab, NEVER load in this WebView.
         var url = createWindowAction.request.url?.toString() ?? '';
         if (url.isEmpty) url = 'about:blank';
         final id = ++_windowSeq;
         _openPopup(url, id);
-        return false; // do not create system window
+        // false = do not create WKWebView popup; opener must stay put.
+        return false;
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
         final u = navigationAction.request.url;
         if (u == null) return NavigationActionPolicy.CANCEL;
         final scheme = u.scheme.toLowerCase();
-        if (scheme == 'http' ||
-            scheme == 'https' ||
-            scheme == 'about' ||
-            scheme == 'data' ||
-            scheme == 'blob') {
-          return NavigationActionPolicy.ALLOW;
+        if (scheme != 'http' &&
+            scheme != 'https' &&
+            scheme != 'about' &&
+            scheme != 'data' &&
+            scheme != 'blob') {
+          return NavigationActionPolicy.CANCEL;
         }
-        return NavigationActionPolicy.CANCEL;
+        // iOS: targetFrame == null means navigation is for a new window.
+        // Divert to a tab and cancel so the opener page never navigates.
+        if (navigationAction.targetFrame == null) {
+          final s = u.toString();
+          if (s.isNotEmpty && s != 'about:blank') {
+            _openPopup(s, ++_windowSeq);
+            return NavigationActionPolicy.CANCEL;
+          }
+        }
+        return NavigationActionPolicy.ALLOW;
       },
     );
   }
