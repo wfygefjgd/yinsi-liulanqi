@@ -71,7 +71,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 const _InfoTile(
                   icon: Icons.info_outline,
                   title: '版本',
-                  subtitle: '1.0.21',
+                  subtitle: '1.0.22',
                 ),
               ],
             ),

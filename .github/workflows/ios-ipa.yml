@@ -145,21 +145,20 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.21
-          name: "隐私浏览器 iOS v1.0.21"
+          tag_name: v1.0.22
+          name: "隐私浏览器 iOS v1.0.22"
           body: |
-            ## 隐私浏览器 · 修复原页被一起跳转
+            ## 隐私浏览器 · 复查加固
 
             ### 标识
             - **显示名**: 隐私浏览器
             - **Bundle ID**: `com.tongyong.browser`
-            - **Version**: 1.0.21 · **Build**: 46
+            - **Version**: 1.0.22 · **Build**: 47
 
-            ### 关键修复
-            - **根因**：`supportMultipleWindows: false` 时，window.open / target=_blank 会在**当前标签**里导航，同时我们又新开了标签 → 两个标签变成同一页
-            - **修复**：开启 `supportMultipleWindows`，由 `onCreateWindow` 开新标签且原页不动
-            - **加固**：JS 拦截 `target=_blank` 点击/表单；`targetFrame == null` 的导航取消并转标签
-            - **去重**：polyfill 与原生回调 800ms 内同一 URL 只开一次
+            ### 修复
+            - **Android 安全**：`targetFrame == null` 仅在 iOS/macOS 拦截（Android 上该字段恒为 null，会误拦全部导航）
+            - **反指纹**：去掉桌面伪装，与 iPhone UA 一致；Canvas 噪声 + WebGL Apple GPU
+            - **wipeAndExit**：退出前恢复用户偏好（自动清理开关）
 
             ### 下载
             - `Tongyong-Browser-iOS.ipa`

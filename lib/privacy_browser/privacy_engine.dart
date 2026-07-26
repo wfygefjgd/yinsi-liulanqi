@@ -62,14 +62,13 @@ class PrivacyEngine {
     if (_wiping) return;
     _wiping = true;
     try {
-      // Fast: clear web layer immediately (cookies, cache, clipboard)
+      // Preserve user prefs in case exit is delayed / fails.
+      final preserved = await _snapshotPreservedPrefs();
       await _wipeWebLayer();
       await _wipeFlutterPrefs();
-      // Fire native wipe but don't wait
       unawaited(_channel.invokeMethod<void>('nuclearWipe').catchError((_) {}));
-      // Deep clean dirs in background
       unawaited(_wipeAppDirs().then((_) => _wipeWebLayer()));
-      // Brief delay so user sees smooth transition, then kill
+      await _restorePreservedPrefs(preserved);
       await Future.delayed(const Duration(milliseconds: 150));
       exit(0);
     } finally {

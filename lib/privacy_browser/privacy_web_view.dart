@@ -1,6 +1,8 @@
 import 'dart:collection';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -85,82 +87,68 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
     userAgent: _randomUA(),
   );
 
+  /// Keep consistent with iPhone UA (do not spoof desktop — that is a fingerprint).
   static const _antiFingerprint = r'''
 (function(){
   if (window.__pbAntiFinger) return;
   window.__pbAntiFinger = true;
 
-  // Fake screen resolution to desktop size
   try {
-    Object.defineProperty(screen, 'width', { get: () => 1920 });
-    Object.defineProperty(screen, 'height', { get: () => 1080 });
-    Object.defineProperty(screen, 'availWidth', { get: () => 1920 });
-    Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
-    Object.defineProperty(window, 'innerWidth', { get: () => 1920 });
-    Object.defineProperty(window, 'innerHeight', { get: () => 1040 });
-    Object.defineProperty(window, 'outerWidth', { get: () => 1920 });
-    Object.defineProperty(window, 'outerHeight', { get: () => 1040 });
-    Object.defineProperty(window, 'devicePixelRatio', { get: () => 1 });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
+  } catch(e){}
+  try {
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 4 });
+  } catch(e){}
+  try {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
   } catch(e){}
 
-  // Fake platform to desktop
   try {
-    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
-  } catch(e){}
-
-  // Remove touch points
-  try {
-    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
-  } catch(e){}
-
-  // Fake hardware concurrency (desktop CPU)
-  try {
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-  } catch(e){}
-
-  // Override getBoundingClientRect to return desktop-like values
-  const origGetBoundingClientRect = Element.prototype.getBoundingClientRect;
-  Element.prototype.getBoundingClientRect = function() {
-    const rect = origGetBoundingClientRect.call(this);
-    return rect;
-  };
-
-  // Fake DeviceMemory
-  try {
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-  } catch(e){}
-
-  // Block canvas fingerprinting
-  try {
-    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    var noise = function(canvas) {
+      try {
+        var ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        var w = canvas.width || 0, h = canvas.height || 0;
+        if (w < 1 || h < 1) return;
+        var x = Math.min(w - 1, 1) | 0, y = Math.min(h - 1, 1) | 0;
+        var d = ctx.getImageData(x, y, 1, 1);
+        d.data[0] = (d.data[0] + 1) % 256;
+        ctx.putImageData(d, x, y);
+      } catch(e){}
+    };
+    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function() {
-      // Return blank image
-      const blank = document.createElement('canvas');
-      blank.width = this.width;
-      blank.height = this.height;
-      return origToDataURL.call(blank);
+      noise(this);
+      return origToDataURL.apply(this, arguments);
     };
-
-    const origToBlob = HTMLCanvasElement.prototype.toBlob;
+    var origToBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function() {
-      const blank = document.createElement('canvas');
-      blank.width = this.width;
-      blank.height = this.height;
-      return origToBlob.call(blank);
+      noise(this);
+      return origToBlob.apply(this, arguments);
+    };
+    var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+    CanvasRenderingContext2D.prototype.getImageData = function() {
+      var data = origGetImageData.apply(this, arguments);
+      try {
+        if (data && data.data && data.data.length) {
+          data.data[0] = (data.data[0] + 1) % 256;
+        }
+      } catch(e){}
+      return data;
     };
   } catch(e){}
 
-  // Block WebGL fingerprinting
-  try {
-    const origGetParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(param) {
-      // UNMASKED_VENDOR_WEBGL
-      if (param === 37445) return 'Google Inc.';
-      // UNMASKED_RENDERER_WEBGL
-      if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)';
-      return origGetParameter.call(this, param);
+  function patchWebGL(proto) {
+    if (!proto || !proto.getParameter) return;
+    var orig = proto.getParameter;
+    proto.getParameter = function(param) {
+      if (param === 37445) return 'Apple Inc.';
+      if (param === 37446) return 'Apple GPU';
+      return orig.call(this, param);
     };
-  } catch(e){}
+  }
+  try { patchWebGL(WebGLRenderingContext && WebGLRenderingContext.prototype); } catch(e){}
+  try { patchWebGL(typeof WebGL2RenderingContext !== 'undefined' && WebGL2RenderingContext.prototype); } catch(e){}
 })();
 ''';
 
@@ -524,9 +512,11 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
             scheme != 'blob') {
           return NavigationActionPolicy.CANCEL;
         }
-        // iOS: targetFrame == null means navigation is for a new window.
-        // Divert to a tab and cancel so the opener page never navigates.
-        if (navigationAction.targetFrame == null) {
+        // iOS/macOS only: targetFrame is null for new-window navigations.
+        // On Android targetFrame is always null — must not cancel main loads.
+        final isApple = defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS;
+        if (isApple && navigationAction.targetFrame == null) {
           final s = u.toString();
           if (s.isNotEmpty && s != 'about:blank') {
             _openPopup(s, ++_windowSeq);

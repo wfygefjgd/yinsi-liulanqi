@@ -235,10 +235,12 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     final tm = context.read<TabManager>();
     final target =
         (url.isEmpty || url == 'about:blank') ? 'about:blank' : url;
+    // Pure about:blank without follow-up navigate is noise; skip.
+    if (target == 'about:blank') return;
     final tabId = tm.openInNewTabForeground(target);
     if (tabId == null) return;
     _pruneStaleControllers(tm);
-    _addressCtrl.text = target == 'about:blank' ? '' : target;
+    _addressCtrl.text = target;
     setState(() => _showTabs = false);
   }
 
@@ -249,6 +251,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     final target =
         (url.isEmpty || url == 'about:blank') ? 'about:blank' : url;
     final openerCtrl = _activeController;
+    // Keep about:blank tabs: sites often open blank then set location.
     final tabId = tm.openInNewTabForeground(target);
     if (tabId == null) return;
     _pruneStaleControllers(tm);
