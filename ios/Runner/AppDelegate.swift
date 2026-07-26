@@ -86,9 +86,10 @@ enum PrivacyNativeWipe {
     wipeProcessInfo()
     resetNetworkState()
 
-    // 7) Second pass after delay (catch async writers)
+    // 7) Second pass after delay (catch async writers).
+    // Do NOT wipe Preferences here — Flutter restores user prefs after nuclearWipe returns.
     DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.2) {
-      wipeSandboxFiles()
+      wipeSandboxFiles(includePreferences: false)
       HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
     }
 
@@ -102,22 +103,25 @@ enum PrivacyNativeWipe {
     }
   }
 
-  private static func wipeSandboxFiles() {
+  private static func wipeSandboxFiles(includePreferences: Bool = true) {
     let fm = FileManager.default
     let home = URL(fileURLWithPath: NSHomeDirectory())
-    let targets = [
+    var targets = [
       home.appendingPathComponent("Library/Cookies"),
       home.appendingPathComponent("Library/WebKit"),
       home.appendingPathComponent("Library/Caches"),
       home.appendingPathComponent("Library/HTTPStorages"),
       home.appendingPathComponent("Library/Application Support"),
-      home.appendingPathComponent("Library/Preferences"),
       home.appendingPathComponent("Library/SplashBoard"),
       home.appendingPathComponent("Library/Saved Application State"),
       home.appendingPathComponent("Library/WebKit/WebsiteData"),
       home.appendingPathComponent("tmp"),
       home.appendingPathComponent("Documents"),
     ]
+    // Preferences only on the first pass; delayed pass would erase restored SharedPreferences.
+    if includePreferences {
+      targets.append(home.appendingPathComponent("Library/Preferences"))
+    }
     for url in targets {
       wipeDirectoryContents(url, fileManager: fm)
     }

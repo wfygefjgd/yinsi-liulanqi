@@ -6,11 +6,11 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:provider/provider.dart';
 
 import 'browser_tab_model.dart';
+import 'popup_registry.dart';
 import 'privacy_engine.dart';
 import 'privacy_web_view.dart';
 import 'settings_page.dart';
 import 'tab_manager.dart';
-import 'window_popup_page.dart' show WindowPopupOverlay;
 
 /// Safari-like dark palette
 class _S {
@@ -79,6 +79,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   bool _resetting = false;
   bool _coldStarting = false;
   bool _showTabs = false;
+  bool _backgroundBusy = false;
 
   @override
   void initState() {
@@ -109,36 +110,41 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     }
   }
 
-  /// Entering background: if auto-wipe enabled, destroy WebViews + fast wipe + mark cold-start.
-  /// Then gracefully exit after brief delay (elegant violence).
+  /// Entering background: if auto-wipe enabled, destroy WebViews + fast wipe + exit.
   Future<void> _enterBackground() async {
-    final autoWipe = await _isAutoWipeEnabled();
-    if (!autoWipe) {
-      return;
+    if (_backgroundBusy || _resetting || _coldStarting) return;
+    _backgroundBusy = true;
+    try {
+      final autoWipe = await _isAutoWipeEnabled();
+      if (!autoWipe || !mounted || _resetting) return;
+      final tm = context.read<TabManager>();
+      PopupRegistry.clearAll();
+      _disposeControllers();
+      tm.hardResetTabs();
+      tm.markColdStartPending();
+      if (!mounted) return;
+      _addressCtrl.clear();
+      setState(() => _showTabs = false);
+      // Fast wipe, then elegant exit (user won't see the violence)
+      unawaited(PrivacyEngine.wipeAndExit());
+    } finally {
+      _backgroundBusy = false;
     }
-    final tm = context.read<TabManager>();
-    WindowPopupOverlay.hide(notify: false);
-    _disposeControllers();
-    tm.hardResetTabs();
-    tm.markColdStartPending();
-    if (!mounted) return;
-    _addressCtrl.clear();
-    setState(() => _showTabs = false);
-    // Fast wipe, then elegant exit (user won't see the violence)
-    unawaited(PrivacyEngine.wipeAndExit());
   }
 
-  /// On resume: refresh pref, always show cold start splash (app was killed).
+  /// On resume: if process survived, show splash; if killed, system cold-starts.
   Future<void> _onResume() async {
-    await _refreshAutoWipePref();
-    if (!await _isAutoWipeEnabled()) {
-      return;
+    while (_backgroundBusy) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
     }
+    if (!mounted) return;
+    await _refreshAutoWipePref();
+    if (!await _isAutoWipeEnabled()) return;
     final tm = context.read<TabManager>();
-    tm.clearColdStartPending();
+    if (!tm.coldStartPending) return;
     if (_coldStarting) return;
+    tm.clearColdStartPending();
     setState(() => _coldStarting = true);
-    // Show splash for smooth visual
     await Future.delayed(const Duration(milliseconds: 400));
     if (!mounted) return;
     _addressCtrl.clear();
@@ -170,6 +176,17 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     _controllers.clear();
   }
 
+  void _pruneStaleControllers(TabManager tm) {
+    final live = tm.tabs.map((t) => t.id).toSet();
+    final stale = _controllers.keys.where((k) => !live.contains(k)).toList();
+    for (final id in stale) {
+      final c = _controllers.remove(id);
+      try {
+        c?.dispose();
+      } catch (_) {}
+    }
+  }
+
   InAppWebViewController? get _activeController {
     if (_controllers.isEmpty) return null;
     final tm = context.read<TabManager>();
@@ -183,32 +200,115 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   Future<void> _go(String raw) async {
     var input = raw.trim();
     if (input.isEmpty) return;
-    late WebUri uri;
+    late final String target;
     if (input.startsWith('http://') || input.startsWith('https://')) {
-      uri = WebUri(input);
+      target = input;
     } else if (input.contains(' ') || !input.contains('.')) {
-      uri = WebUri(
-        'https://duckduckgo.com/?q=${Uri.encodeComponent(input)}',
-      );
+      target = 'https://duckduckgo.com/?q=${Uri.encodeComponent(input)}';
     } else {
-      uri = WebUri('https://$input');
+      target = 'https://$input';
     }
+    final tm = context.read<TabManager>();
+    final tab = tm.active;
+    tab.pendingUrl = null;
+    tab.url = target;
+    tab.addressText = target;
+    tab.title = '加载中…';
+    tm.notifyTabChanged();
     final c = _activeController;
-    if (c == null) return;
-    await c.loadUrl(urlRequest: URLRequest(url: uri));
+    if (c == null) {
+      tab.pendingUrl = target;
+    } else {
+      try {
+        await c.loadUrl(urlRequest: URLRequest(url: WebUri(target)));
+      } catch (_) {
+        tab.pendingUrl = target;
+      }
+    }
     _addressFocus.unfocus();
     if (mounted) setState(() => _showTabs = false);
   }
 
-  /// Real window.open — Overlay on top of browser (main page stays underneath).
+  /// window.open / target=_blank → new browser tab (keeps current page).
+  void _openAsNewTab(String url) {
+    if (!mounted) return;
+    final tm = context.read<TabManager>();
+    final target =
+        (url.isEmpty || url == 'about:blank') ? 'about:blank' : url;
+    final tabId = tm.openInNewTabForeground(target);
+    if (tabId == null) return;
+    _pruneStaleControllers(tm);
+    _addressCtrl.text = target == 'about:blank' ? '' : target;
+    setState(() => _showTabs = false);
+  }
+
+  /// JS window.open polyfill → tab + PopupRegistry for navigate/close.
   void _onWindowOpen(String url, int windowId, VoidCallback onClosed) {
     if (!mounted) return;
-    WindowPopupOverlay.show(
-      context,
-      url: url.isEmpty ? 'about:blank' : url,
-      windowId: windowId,
-      onClosed: onClosed,
-    );
+    final tm = context.read<TabManager>();
+    final target =
+        (url.isEmpty || url == 'about:blank') ? 'about:blank' : url;
+    final openerCtrl = _activeController;
+    final tabId = tm.openInNewTabForeground(target);
+    if (tabId == null) return;
+    _pruneStaleControllers(tm);
+
+    for (final wid in PopupRegistry.detachWindowsForTab(tabId)) {
+      if (wid == windowId) continue;
+      try {
+        openerCtrl?.evaluateJavascript(
+          source:
+              'try{window.__pbMarkPopupClosed&&window.__pbMarkPopupClosed($wid);}catch(e){}',
+        );
+      } catch (_) {}
+    }
+
+    PopupRegistry.bindWindowToTab(windowId, tabId);
+    PopupRegistry.registerNavigator(windowId, (u) {
+      if (!mounted) return;
+      final ctrl = _controllers[tabId];
+      if (ctrl != null) {
+        final manager = context.read<TabManager>();
+        final t = manager.tabById(tabId);
+        if (t != null) {
+          t.pendingUrl = null;
+          t.url = u;
+          t.addressText = u;
+          t.title = '加载中…';
+          manager.notifyTabChanged();
+        }
+        try {
+          ctrl.loadUrl(urlRequest: URLRequest(url: WebUri(u)));
+        } catch (_) {}
+      } else {
+        context.read<TabManager>().loadUrlInTab(tabId, u);
+      }
+    });
+    PopupRegistry.registerCloser(windowId, () {
+      if (!mounted) return;
+      final manager = context.read<TabManager>();
+      final idx = manager.indexOfTabId(tabId);
+      if (idx == null) {
+        PopupRegistry.unregister(windowId);
+        onClosed();
+        return;
+      }
+      final ctrl = _controllers.remove(tabId);
+      try {
+        ctrl?.dispose();
+      } catch (_) {}
+      PopupRegistry.unregister(windowId);
+      manager.closeTab(idx);
+      onClosed();
+      if (mounted) {
+        _addressCtrl.text =
+            manager.active.isBlank ? '' : manager.active.addressText;
+        setState(() {});
+      }
+    });
+
+    _addressCtrl.text = target == 'about:blank' ? '' : target;
+    setState(() => _showTabs = false);
   }
 
   Future<void> _openBookmark(_Bookmark b) async {
@@ -216,10 +316,20 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
     await _go(b.url);
   }
 
-  void _openSettings() {
-    Navigator.of(context).push(
+  Future<void> _openSettings() async {
+    final before = _autoWipeEnabled;
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const SettingsPage()),
     );
+    if (!mounted) return;
+    await _refreshAutoWipePref();
+    if (before != _autoWipeEnabled) {
+      PopupRegistry.clearAll();
+      _disposeControllers();
+      context.read<TabManager>().hardResetTabs();
+      _addressCtrl.clear();
+      setState(() => _showTabs = false);
+    }
   }
 
   Future<void> _showBookmarks() async {
@@ -314,6 +424,7 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
   Future<void> _runHardReset() async {
     if (_resetting) return;
     setState(() => _resetting = true);
+    PopupRegistry.clearAll();
     _disposeControllers();
     context.read<TabManager>().hardResetTabs();
     _addressCtrl.clear();
@@ -389,10 +500,8 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             tabId: t.id,
                             tab: t,
                             autoWipe: _autoWipeEnabled,
-                            onCreateNewTab: (url) {
-                              // 创建新标签页并自动切换（原页面保持为"页面 1"，新页面为"页面 2"）
-                              tm.openInNewTabForeground(url);
-                            },
+                            onWindowOpen: _onWindowOpen,
+                            onCreateNewTab: _openAsNewTab,
                             onChanged: () {
                               if (mounted) tm.notifyTabChanged();
                             },
@@ -420,7 +529,19 @@ class _PrivacyBrowserShellState extends State<PrivacyBrowserShell>
                             try {
                               ctrl?.dispose();
                             } catch (_) {}
+                            for (final wid
+                                in PopupRegistry.detachWindowsForTab(id)) {
+                              for (final c in _controllers.values) {
+                                try {
+                                  c.evaluateJavascript(
+                                    source:
+                                        'try{window.__pbMarkPopupClosed&&window.__pbMarkPopupClosed($wid);}catch(e){}',
+                                  );
+                                } catch (_) {}
+                              }
+                            }
                             tm.closeTab(i);
+                            _pruneStaleControllers(tm);
                             _addressCtrl.text = tm.active.isBlank
                                 ? ''
                                 : tm.active.addressText;
@@ -710,7 +831,7 @@ class _BarIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = enabled
         ? (color ?? _S.accent)
-        : _S.secondary.withOpacity(0.35);
+        : _S.secondary.withValues(alpha: 0.35);
     return InkWell(
       onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(10),
@@ -782,7 +903,7 @@ class _SafariStartPage extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               const Text(
-                '底部搜索 · 支持网站 window.open 弹窗',
+                '底部搜索 · 新窗口以标签页打开',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _S.secondary, fontSize: 13),
               ),

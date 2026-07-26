@@ -22,7 +22,8 @@ class PrivacyEngine {
     }
     _wiping = true;
     try {
-      // Drop any open popup overlay storage path via web layer first
+      // Keep user prefs across site-data wipe (native also clears UserDefaults).
+      final preserved = await _snapshotPreservedPrefs();
       await _wipeWebLayer();
       await _wipeFlutterPrefs();
       await _wipeAppDirs();
@@ -33,6 +34,7 @@ class PrivacyEngine {
       }
       // Second pass after native (async writers)
       await _wipeWebLayer();
+      await _restorePreservedPrefs(preserved);
       if (exitAfter) {
         await _exitApp();
       }
@@ -95,6 +97,45 @@ class PrivacyEngine {
   }
 
   static Future<SharedPreferences> prefs() => SharedPreferences.getInstance();
+
+  /// Keys that must survive wipe (user preferences, not site data).
+  static const preservePrefKeys = <String>{
+    'pref_auto_wipe_on_background',
+  };
+
+  static Future<Map<String, Object?>> _snapshotPreservedPrefs() async {
+    final keep = <String, Object?>{};
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in preservePrefKeys) {
+        if (prefs.containsKey(key)) {
+          keep[key] = prefs.get(key);
+        }
+      }
+    } catch (_) {}
+    return keep;
+  }
+
+  static Future<void> _restorePreservedPrefs(Map<String, Object?> keep) async {
+    if (keep.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final e in keep.entries) {
+        final v = e.value;
+        if (v is bool) {
+          await prefs.setBool(e.key, v);
+        } else if (v is int) {
+          await prefs.setInt(e.key, v);
+        } else if (v is double) {
+          await prefs.setDouble(e.key, v);
+        } else if (v is String) {
+          await prefs.setString(e.key, v);
+        } else if (v is List<String>) {
+          await prefs.setStringList(e.key, v);
+        }
+      }
+    } catch (_) {}
+  }
 
   static Future<void> _wipeFlutterPrefs() async {
     try {

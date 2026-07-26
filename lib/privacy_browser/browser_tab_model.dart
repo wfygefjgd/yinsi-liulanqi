@@ -24,7 +24,11 @@ class BrowserTabModel {
   /// Pending URL to load once WebView is ready (background open).
   String? pendingUrl;
 
-  bool get isBlank =>
-      (url.isEmpty || url == 'about:blank') &&
-      (pendingUrl == null || pendingUrl!.isEmpty);
+  bool get isBlank {
+    final pendingBlank = pendingUrl == null ||
+        pendingUrl!.isEmpty ||
+        pendingUrl == 'about:blank';
+    final urlBlank = url.isEmpty || url == 'about:blank';
+    return urlBlank && pendingBlank;
+  }
 }

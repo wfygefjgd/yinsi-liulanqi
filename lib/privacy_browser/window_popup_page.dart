@@ -87,7 +87,7 @@ class _PopupChromeState extends State<_PopupChrome> {
     return 'Mozilla/5.0 (iPhone; CPU iPhone OS $ios like Mac OS X) AppleWebKit/$build (KHTML, like Gecko) Version/17.0 Mobile/$mobile Safari/604.1';
   }
 
-  /// Identical privacy profile to main PrivacyWebView.
+  /// Identical privacy profile to main PrivacyWebView (autoWipe=true).
   InAppWebViewSettings get _privacySettings => InAppWebViewSettings(
     incognito: true,
     javaScriptEnabled: true,
@@ -104,72 +104,77 @@ class _PopupChromeState extends State<_PopupChrome> {
     useWideViewPort: true,
     loadWithOverviewMode: true,
     transparentBackground: false,
-    javaScriptCanOpenWindowsAutomatically: false,
+    javaScriptCanOpenWindowsAutomatically: true,
     supportMultipleWindows: false,
     useShouldOverrideUrlLoading: true,
     sharedCookiesEnabled: false,
     userAgent: _randomUA(),
   );
 
+  /// Keep in sync with PrivacyWebView._antiFingerprint.
   static const _antiFingerprint = r'''
 (function(){
   if (window.__pbAntiFinger) return;
   window.__pbAntiFinger = true;
 
   try {
-    Object.defineProperty(screen, 'width', { get: () => 1920 });
-    Object.defineProperty(screen, 'height', { get: () => 1080 });
-    Object.defineProperty(screen, 'availWidth', { get: () => 1920 });
-    Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
-    Object.defineProperty(window, 'innerWidth', { get: () => 1920 });
-    Object.defineProperty(window, 'innerHeight', { get: () => 1040 });
-    Object.defineProperty(window, 'outerWidth', { get: () => 1920 });
-    Object.defineProperty(window, 'outerHeight', { get: () => 1040 });
-    Object.defineProperty(window, 'devicePixelRatio', { get: () => 1 });
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
   } catch(e){}
 
   try {
-    Object.defineProperty(navigator, 'platform', { get: () => 'MacIntel' });
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 4 });
   } catch(e){}
 
   try {
-    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
   } catch(e){}
 
   try {
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-  } catch(e){}
-
-  try {
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-  } catch(e){}
-
-  try {
-    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    const noise = function(canvas) {
+      try {
+        var ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        var w = canvas.width || 0, h = canvas.height || 0;
+        if (w < 1 || h < 1) return;
+        var x = Math.min(w - 1, 1) | 0, y = Math.min(h - 1, 1) | 0;
+        var d = ctx.getImageData(x, y, 1, 1);
+        d.data[0] = (d.data[0] + 1) % 256;
+        ctx.putImageData(d, x, y);
+      } catch(e){}
+    };
+    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function() {
-      const blank = document.createElement('canvas');
-      blank.width = this.width;
-      blank.height = this.height;
-      return origToDataURL.call(blank);
+      noise(this);
+      return origToDataURL.apply(this, arguments);
     };
-
-    const origToBlob = HTMLCanvasElement.prototype.toBlob;
+    var origToBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function() {
-      const blank = document.createElement('canvas');
-      blank.width = this.width;
-      blank.height = this.height;
-      return origToBlob.call(blank);
+      noise(this);
+      return origToBlob.apply(this, arguments);
+    };
+    var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+    CanvasRenderingContext2D.prototype.getImageData = function() {
+      var data = origGetImageData.apply(this, arguments);
+      try {
+        if (data && data.data && data.data.length) {
+          data.data[0] = (data.data[0] + 1) % 256;
+        }
+      } catch(e){}
+      return data;
     };
   } catch(e){}
 
-  try {
-    const origGetParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(param) {
-      if (param === 37445) return 'Google Inc.';
-      if (param === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)';
-      return origGetParameter.call(this, param);
+  function patchWebGL(proto) {
+    if (!proto || !proto.getParameter) return;
+    var orig = proto.getParameter;
+    proto.getParameter = function(param) {
+      if (param === 37445) return 'Apple Inc.';
+      if (param === 37446) return 'Apple GPU';
+      return orig.call(this, param);
     };
-  } catch(e){}
+  }
+  try { patchWebGL(WebGLRenderingContext && WebGLRenderingContext.prototype); } catch(e){}
+  try { patchWebGL(typeof WebGL2RenderingContext !== 'undefined' && WebGL2RenderingContext.prototype); } catch(e){}
 })();
 ''';
 
@@ -452,16 +457,59 @@ ${_antiFingerprint}
                       initialUserScripts: _userScripts,
                       onWebViewCreated: (c) {
                         _controller = c;
+                        c.addJavaScriptHandler(
+                          handlerName: 'windowNavigate',
+                          callback: (args) {
+                            final id = args.isNotEmpty
+                                ? int.tryParse(args[0]?.toString() ?? '') ?? 0
+                                : 0;
+                            final url = args.length > 1
+                                ? args[1]?.toString() ?? ''
+                                : '';
+                            if (id != 0 && url.isNotEmpty) {
+                              PopupRegistry.navigate(id, url);
+                            }
+                            return null;
+                          },
+                        );
+                        c.addJavaScriptHandler(
+                          handlerName: 'windowClose',
+                          callback: (args) {
+                            final id = args.isNotEmpty
+                                ? int.tryParse(args[0]?.toString() ?? '') ?? 0
+                                : 0;
+                            if (id != 0) {
+                              PopupRegistry.closeFromPage(id);
+                            }
+                            return null;
+                          },
+                        );
+                        c.addJavaScriptHandler(
+                          handlerName: 'windowOpen',
+                          callback: (args) {
+                            final url =
+                                args.isNotEmpty ? args[0]?.toString() ?? '' : '';
+                            if (url.isNotEmpty &&
+                                url != 'about:blank' &&
+                                !url.startsWith('javascript:')) {
+                              _navigateTo(url);
+                            }
+                            return widget.windowId;
+                          },
+                        );
                       },
                       onProgressChanged: (c, p) {
+                        if (!mounted || _closed) return;
                         setState(() => _progress = p / 100.0);
                       },
                       onTitleChanged: (c, t) {
+                        if (!mounted || _closed) return;
                         if (t != null && t.trim().isNotEmpty) {
                           setState(() => _title = t.trim());
                         }
                       },
                       onLoadStop: (c, u) {
+                        if (!mounted || _closed) return;
                         if (u != null) {
                           final s = u.toString();
                           if (!s.startsWith('data:')) {

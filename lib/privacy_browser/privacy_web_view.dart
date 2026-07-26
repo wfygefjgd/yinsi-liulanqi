@@ -281,10 +281,12 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
 
   Future<void> _syncNav() async {
     final c = _controller;
-    if (c == null) return;
-    widget.tab.canGoBack = await c.canGoBack();
-    widget.tab.canGoForward = await c.canGoForward();
-    widget.onChanged();
+    if (c == null || !mounted) return;
+    try {
+      widget.tab.canGoBack = await c.canGoBack();
+      widget.tab.canGoForward = await c.canGoForward();
+      if (mounted) widget.onChanged();
+    } catch (_) {}
   }
 
   Future<void> _loadPending() async {
@@ -292,23 +294,37 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
     final pending = widget.tab.pendingUrl;
     if (c == null || pending == null || pending.isEmpty) return;
     widget.tab.pendingUrl = null;
+    if (pending == 'about:blank') return;
     try {
       await c.loadUrl(urlRequest: URLRequest(url: WebUri(pending)));
     } catch (_) {}
   }
 
+  @override
+  void dispose() {
+    _controller = null;
+    super.dispose();
+  }
+
   void _openPopup(String url, int id) {
-    final cb = widget.onWindowOpen;
-    if (cb == null) return;
     if (url.isEmpty) url = 'about:blank';
-    cb(url, id, () {
-      final c = _controller;
-      if (c == null) return;
-      c.evaluateJavascript(
-        source:
-            'try{window.__pbMarkPopupClosed&&window.__pbMarkPopupClosed($id);}catch(e){}',
-      );
-    });
+    // Prefer onWindowOpen (tab + PopupRegistry for navigate/close).
+    final cb = widget.onWindowOpen;
+    if (cb != null) {
+      cb(url, id, () {
+        final c = _controller;
+        if (c == null) return;
+        c.evaluateJavascript(
+          source:
+              'try{window.__pbMarkPopupClosed&&window.__pbMarkPopupClosed($id);}catch(e){}',
+        );
+      });
+      return;
+    }
+    final createTab = widget.onCreateNewTab;
+    if (createTab != null && url != 'about:blank') {
+      createTab(url);
+    }
   }
 
   @override
@@ -391,6 +407,7 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
         widget.onChanged();
       },
       onLoadStop: (controller, url) async {
+        if (!mounted) return;
         widget.tab.isLoading = false;
         widget.tab.progress = 100;
         final s = url?.toString() ?? '';
@@ -398,21 +415,15 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
           widget.tab.url = s;
           widget.tab.addressText = s;
         }
-        if ((s.isEmpty || s == 'about:blank') &&
-            widget.tab.addressText.isNotEmpty &&
-            widget.tab.addressText != 'about:blank') {
-          try {
-            if (await controller.canGoBack()) {
-              await controller.goBack();
-            }
-          } catch (_) {}
-        }
-        final title = await controller.getTitle();
-        if (title != null && title.trim().isNotEmpty) {
-          widget.tab.title = title.trim();
-        } else if (widget.tab.isBlank) {
-          widget.tab.title = '新标签';
-        }
+        try {
+          final title = await controller.getTitle();
+          if (!mounted) return;
+          if (title != null && title.trim().isNotEmpty) {
+            widget.tab.title = title.trim();
+          } else if (widget.tab.isBlank) {
+            widget.tab.title = '新标签';
+          }
+        } catch (_) {}
         await _syncNav();
       },
       onTitleChanged: (controller, title) {
@@ -430,24 +441,25 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
         await _syncNav();
       },
       onCreateWindow: (controller, createWindowAction) async {
-        // 使用标签页系统代替弹窗：原页面保持为"页面 1"，新页面作为"页面 2"打开并自动切换
-        final url = createWindowAction.request.url?.toString() ?? 'about:blank';
-        final createTab = widget.onCreateNewTab;
-        if (createTab != null && url.isNotEmpty && url != 'about:blank') {
-          createTab(url);
-        }
-        return true; // 返回 true 阻止原页面加载
+        // Tab system: keep current page, open as second tab.
+        var url = createWindowAction.request.url?.toString() ?? '';
+        if (url.isEmpty) url = 'about:blank';
+        final id = ++_windowSeq;
+        _openPopup(url, id);
+        return false; // do not create system window
       },
       shouldOverrideUrlLoading: (controller, navigationAction) async {
-        final request = navigationAction.request;
-        final isWindowOpen = navigationAction.isForMainFrame == false;
-
-        // 如果是 window.open 触发的，阻止原页面加载
-        if (isWindowOpen) {
-          return NavigationActionPolicy.CANCEL;
+        final u = navigationAction.request.url;
+        if (u == null) return NavigationActionPolicy.CANCEL;
+        final scheme = u.scheme.toLowerCase();
+        if (scheme == 'http' ||
+            scheme == 'https' ||
+            scheme == 'about' ||
+            scheme == 'data' ||
+            scheme == 'blob') {
+          return NavigationActionPolicy.ALLOW;
         }
-
-        return NavigationActionPolicy.ALLOW;
+        return NavigationActionPolicy.CANCEL;
       },
     );
   }
