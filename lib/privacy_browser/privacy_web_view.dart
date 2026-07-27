@@ -49,6 +49,22 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
   String? _lastOpenUrl;
   int _lastOpenMs = 0;
 
+  /// 白名单域名：这些网站使用更宽松的设置
+  static const _whitelistedDomains = [
+    'jiurelay.com',
+  ];
+
+  bool _isWhitelisted(String? url) {
+    if (url == null || url.isEmpty) return false;
+    try {
+      final uri = Uri.parse(url);
+      final host = uri.host.toLowerCase();
+      return _whitelistedDomains.any((domain) => host.contains(domain));
+    } catch (_) {
+      return false;
+    }
+  }
+
   static final _rng = Random();
   static const _iosVersions = ['16_0', '16_1', '16_2', '17_0', '17_1', '17_2', '17_4'];
   static const _safariBuilds = ['605.1.15', '605.1.16', '604.1'];
@@ -64,9 +80,9 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
   InAppWebViewSettings get _settings => InAppWebViewSettings(
     incognito: widget.autoWipe,
     javaScriptEnabled: true,
-    domStorageEnabled: !widget.autoWipe,
+    domStorageEnabled: true, // 启用 localStorage，很多现代网站需要它
     databaseEnabled: !widget.autoWipe,
-    cacheEnabled: !widget.autoWipe,
+    cacheEnabled: true, // 允许缓存，提高加载速度
     clearCache: widget.autoWipe,
     // Must be true so window.open / target=_blank hit onCreateWindow
     // instead of navigating the *current* tab (which caused dual same-URL tabs).
@@ -88,67 +104,15 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
   );
 
   /// Keep consistent with iPhone UA (do not spoof desktop — that is a fingerprint).
+  /// 轻量级反指纹：仅伪装 webdriver，不修改 Canvas/WebGL（减少兼容性问题）
   static const _antiFingerprint = r'''
 (function(){
   if (window.__pbAntiFinger) return;
   window.__pbAntiFinger = true;
 
   try {
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
-  } catch(e){}
-  try {
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 4 });
-  } catch(e){}
-  try {
     Object.defineProperty(navigator, 'webdriver', { get: () => false });
   } catch(e){}
-
-  try {
-    var noise = function(canvas) {
-      try {
-        var ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        var w = canvas.width || 0, h = canvas.height || 0;
-        if (w < 1 || h < 1) return;
-        var x = Math.min(w - 1, 1) | 0, y = Math.min(h - 1, 1) | 0;
-        var d = ctx.getImageData(x, y, 1, 1);
-        d.data[0] = (d.data[0] + 1) % 256;
-        ctx.putImageData(d, x, y);
-      } catch(e){}
-    };
-    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function() {
-      noise(this);
-      return origToDataURL.apply(this, arguments);
-    };
-    var origToBlob = HTMLCanvasElement.prototype.toBlob;
-    HTMLCanvasElement.prototype.toBlob = function() {
-      noise(this);
-      return origToBlob.apply(this, arguments);
-    };
-    var origGetImageData = CanvasRenderingContext2D.prototype.getImageData;
-    CanvasRenderingContext2D.prototype.getImageData = function() {
-      var data = origGetImageData.apply(this, arguments);
-      try {
-        if (data && data.data && data.data.length) {
-          data.data[0] = (data.data[0] + 1) % 256;
-        }
-      } catch(e){}
-      return data;
-    };
-  } catch(e){}
-
-  function patchWebGL(proto) {
-    if (!proto || !proto.getParameter) return;
-    var orig = proto.getParameter;
-    proto.getParameter = function(param) {
-      if (param === 37445) return 'Apple Inc.';
-      if (param === 37446) return 'Apple GPU';
-      return orig.call(this, param);
-    };
-  }
-  try { patchWebGL(WebGLRenderingContext && WebGLRenderingContext.prototype); } catch(e){}
-  try { patchWebGL(typeof WebGL2RenderingContext !== 'undefined' && WebGL2RenderingContext.prototype); } catch(e){}
 })();
 ''';
 
@@ -477,6 +441,19 @@ class _PrivacyWebViewState extends State<PrivacyWebView> {
           }
         } catch (_) {}
         await _syncNav();
+
+        // 添加错误检测和日志
+        try {
+          final hasError = await controller.evaluateJavascript(source: '''
+            (function() {
+              var errors = window.__pbErrors || [];
+              return errors.length > 0 ? JSON.stringify(errors) : null;
+            })();
+          ''');
+          if (hasError != null) {
+            debugPrint('页面加载错误: $hasError');
+          }
+        } catch (_) {}
       },
       onTitleChanged: (controller, title) {
         if (title != null && title.trim().isNotEmpty) {
